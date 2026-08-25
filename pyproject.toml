@@ -51,6 +51,11 @@ dev = [
     "ruff>=0.8.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+]
+eval = [
+    "openai>=1.0.0",
+    "ragas>=0.4.0",
 ]
 
 [project.urls]
@@ -63,4 +68,21 @@ asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 markers = [
     "memory_harness: deterministic evaluation of memory retrieval, lifecycle, compaction and context contracts",
+    "agent_quality_harness: deterministic evaluation of short/long memory, guardrails, ambiguity and task scoring",
+    "slow: evaluation that calls a real model or external service and is excluded from normal tests",
+    "ragas: context-grounding evaluation that calls a real application LLM and evaluator LLM",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.coverage.report]
+fail_under = 60
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
 ]
