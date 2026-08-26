@@ -4,16 +4,20 @@ import PageHeader from '../components/common/PageHeader'
 import StatCard from '../components/common/StatCard'
 import TaskTable, { formatDue } from '../components/task/TaskTable'
 import NewTaskModal from '../components/task/NewTaskModal'
+import TaskConflictModal from '../components/task/TaskConflictModal'
 import EmptyState from '../components/fx/EmptyState'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { useWorkspace } from '../context/WorkspaceContext'
 import { listTasks, updateTaskStatus, deleteTask } from '../api/tasks'
 import { useTaskAccept } from '../hooks/useTaskAccept'
 
 const sourceLabel = { manual: 'Manual', proactive: 'AI suggestion' }
+const ACTION_FAILED = 'Không thực hiện được, thử lại sau.'
 
 export default function TaskPage() {
   const { token } = useAuth()
+  const { pushToast } = useToast()
   const { workspaceId } = useWorkspace()
   const { subscribe } = useOutletContext()
   const [tasks, setTasks] = useState([])
@@ -55,7 +59,6 @@ export default function TaskPage() {
   const pending = mainTasks.length - completed - overdue
 
   const taskError = (err) => setError(err.detail || 'Could not update the task.')
-  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask).catch(taskError)
   const dismiss = (task) => updateTaskStatus(token, task.id, 'dismissed').then(upsertTask).catch(taskError)
   const complete = (task) => updateTaskStatus(token, task.id, 'completed').then(upsertTask).catch(taskError)
   const remove = (task) => deleteTask(token, task.id).then(() => removeTask(task.id)).catch(taskError)
@@ -76,5 +79,6 @@ export default function TaskPage() {
       {!loading && !suggestions.length && <EmptyState variant="float" icon="bi-stars" title="No new suggestions right now" description={'Try "Extract tasks" in a conversation\'s AI panel — Orbit is standing by to scan for action items.'} />}
     </div></section>
     <NewTaskModal open={newOpen} onClose={()=>setNewOpen(false)} onCreated={upsertTask} workspaceId={workspaceId}/>
+    <TaskConflictModal conflict={conflict} busy={busy} onPickTime={pickTime} onAcceptAnyway={acceptAnyway} onDismiss={dismissConflicted} onClose={close} />
   </div>
 }

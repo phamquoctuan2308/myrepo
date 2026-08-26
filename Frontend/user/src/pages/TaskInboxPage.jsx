@@ -49,9 +49,6 @@ export default function TaskInboxPage() {
 
   const { needsDecision, overdue, dueSoon, highPriority } = groupTasks(tasks)
 
-  // Re-throws after toasting (unlike dismiss/complete below) so FluidButton's own success/error
-  // state - the checkmark morph - only ever fires on a real success, never on a swallowed failure.
-  const accept = (task) => updateTaskStatus(token, task.id, 'pending').then(upsertTask).catch(err => { pushToast(err.detail || ACTION_FAILED); throw err })
   const dismiss = (task) => updateTaskStatus(token, task.id, 'dismissed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
   const complete = (task) => updateTaskStatus(token, task.id, 'completed').then(upsertTask).catch(err => pushToast(err.detail || ACTION_FAILED))
 
@@ -137,6 +134,7 @@ export default function TaskInboxPage() {
         icon="bi-flag" title="High priority" items={highPriority} tone="warning"
         actions={(task) => <button className="btn btn-sm btn-primary" onClick={() => complete(task)}>Complete</button>}
       />
+      <TaskConflictModal conflict={conflict} busy={busy} onPickTime={pickTime} onAcceptAnyway={acceptAnyway} onDismiss={dismissConflicted} onClose={close} />
     </HologramSurface>
   )
 }
