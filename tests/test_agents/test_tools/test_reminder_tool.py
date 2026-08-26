@@ -117,6 +117,22 @@ async def test_fire_reminder_marks_status_and_pushes_to_owner(
         (
             [user["id"]],
             {
+                "type": "reminder_created",
+                "reminder": {
+                    "id": reminder.id,
+                    "title": "Test",
+                    "message": "",
+                    "due_at": reminder.due_at.isoformat(),
+                    "fire_at": reminder.fire_at.isoformat(),
+                    "status": "scheduled",
+                    "source": "manual",
+                    "created_at": reminder.created_at.isoformat(),
+                },
+            },
+        ),
+        (
+            [user["id"]],
+            {
                 "type": "reminder_fired",
                 "workspace_id": personal_workspace["id"],
                 "reminder": {

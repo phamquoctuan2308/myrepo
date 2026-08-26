@@ -87,7 +87,7 @@ async def test_create_reminder_pushes_reminder_created(client, auth_headers, mon
     owner_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
 
     resp = await client.post(
-        "/api/v1/reminders", json={"title": "Send report", "due_at_iso": "2026-08-10T15:00:00"}, headers=auth_headers
+        "/api/v1/reminders", json={"title": "Send report", "due_at_iso": "2099-08-10T15:00:00"}, headers=auth_headers
     )
     created = resp.json()
 
@@ -110,7 +110,7 @@ async def test_cancel_reminder_pushes_reminder_updated(client, auth_headers, mon
     owner_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
     created = (
         await client.post(
-            "/api/v1/reminders", json={"title": "Throwaway", "due_at_iso": "2026-08-10T15:00:00"}, headers=auth_headers
+            "/api/v1/reminders", json={"title": "Throwaway", "due_at_iso": "2099-08-10T15:00:00"}, headers=auth_headers
         )
     ).json()
 
