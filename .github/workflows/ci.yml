@@ -44,5 +44,7 @@ jobs:
         run: pytest tests/ -v --tb=short
         env:
           APP_ENV: test
+          GOOGLE_API_KEY: test-key
           OPENAI_API_KEY: test-key
+          CREDENTIAL_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
           TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/orbit_test
