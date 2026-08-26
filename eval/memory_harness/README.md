@@ -1,4 +1,5 @@
 # Memory evaluation harness
+
 This directory holds synthetic, versioned retrieval cases. It is deliberately separate from the
 general conversation golden dataset: a memory case declares the records available to a user, the
 query, the records that must be recalled, and records that must never be returned.

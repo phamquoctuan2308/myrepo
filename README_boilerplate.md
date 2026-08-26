@@ -84,7 +84,7 @@ uvicorn src.main:app --reload
 
 - [x] Source Code (GitHub)
 - [x] README.md
-- [x] Architecture Diagram (`docs/architecture_diagram.md`)
+- [x] Architecture Document (`docs/ARCHITECTURE.md`)
 - [x] AI Logs (auto-collected)
 - [ ] Live URL / Deploy
 - [ ] Video Demo

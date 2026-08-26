@@ -8,7 +8,15 @@ from sqlalchemy import select
 from src.agents import graph as agent_graph
 from src.agents.tools import search_tool
 from src.db import session as db_session
-from src.db.models import Conversation, ConversationParticipant, Message, User
+from src.db.models import (
+    AIPermission,
+    Conversation,
+    ConversationParticipant,
+    Message,
+    User,
+    Workspace,
+    WorkspaceMembership,
+)
 
 
 async def _get_user_id(email: str) -> str:
@@ -19,11 +27,40 @@ async def _get_user_id(email: str) -> str:
 
 async def _seed_conversation(alice_id: str, bob_id: str, messages: list[tuple[str, str, datetime]]) -> str:
     async with db_session.async_session_maker() as db:
-        conversation = Conversation(type="direct", name=None, created_by=alice_id)
+        workspace = Workspace(type="organization", name="Search tool test workspace")
+        db.add(workspace)
+        await db.flush()
+        db.add_all(
+            [
+                WorkspaceMembership(workspace_id=workspace.id, user_id=alice_id, role="owner"),
+                WorkspaceMembership(workspace_id=workspace.id, user_id=bob_id, role="member"),
+            ]
+        )
+        conversation = Conversation(
+            workspace_id=workspace.id,
+            type="direct",
+            name=None,
+            created_by=alice_id,
+        )
         db.add(conversation)
         await db.flush()
         for uid in (alice_id, bob_id):
-            db.add(ConversationParticipant(conversation_id=conversation.id, user_id=uid))
+            db.add(
+                ConversationParticipant(
+                    conversation_id=conversation.id,
+                    user_id=uid,
+                    principal_kind="workspace_user",
+                    resource_role="participant",
+                )
+            )
+            db.add(
+                AIPermission(
+                    conversation_id=conversation.id,
+                    user_id=uid,
+                    granted=True,
+                    contribution_allowed=True,
+                )
+            )
         for sender_id, content, created_at in messages:
             db.add(Message(conversation_id=conversation.id, sender_id=sender_id, content=content, created_at=created_at))
         await db.commit()
@@ -37,7 +74,7 @@ def test_state_hidden_from_llm_tool_schema():
 @pytest.mark.asyncio
 async def test_search_messages_no_conversation_id_in_state():
     result = await search_tool.search_messages.coroutine(query="deadline", max_results=20, state={})
-    assert "Not inside a real conversation" in result
+    assert "No active conversation history" in result
 
 
 @pytest.mark.asyncio
@@ -50,7 +87,7 @@ async def test_search_messages_no_results_found(client, auth_headers, other_auth
     result = await search_tool.search_messages.coroutine(
         query="deadline", max_results=20, state={"conversation_id": conv_id}
     )
-    assert "No messages found matching 'deadline'" in result
+    assert "No authorized messages matched 'deadline'" in result
 
 
 @pytest.mark.asyncio
@@ -89,7 +126,7 @@ async def test_search_messages_scoped_via_state_not_spoofable(client, auth_heade
     result = await search_tool.search_messages.coroutine(
         query="secret", max_results=20, state={"conversation_id": other_conv_id}
     )
-    assert "No messages found matching 'secret'" in result
+    assert "No authorized messages matched 'secret'" in result
 
 
 @pytest.mark.asyncio

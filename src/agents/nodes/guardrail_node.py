@@ -57,9 +57,13 @@ async def input_guardrail_node(state: AgentState) -> dict:
             "reason": semantic.reason,
         }
         if semantic.decision == "allow":
-            decision = guardrail_service.GuardrailDecision(True, f"semantic_{semantic.intent}", semantic.reason, "")
+            decision = guardrail_service.GuardrailDecision(
+                True, f"semantic_{semantic.intent}", semantic.reason, ""
+            )
         elif semantic.decision == "clarify":
-            question = guardrail_service.sanitize_untrusted_text(semantic.clarification_question).strip()
+            question = guardrail_service.sanitize_untrusted_text(
+                semantic.clarification_question
+            ).strip()
             return {
                 "guardrail_blocked": False,
                 "guardrail_requires_clarification": True,
@@ -78,13 +82,11 @@ async def input_guardrail_node(state: AgentState) -> dict:
         else:
             safe_reason = guardrail_service.sanitize_untrusted_text(semantic.reason).strip()
             decision = guardrail_service.GuardrailDecision(
-                False,
-                "out_of_domain",
-                safe_reason,
+                False, "out_of_domain", safe_reason,
                 (
-                    f"Orbit kh\u00f4ng th\u1ec3 h\u1ed7 tr\u1ee3 y\u00eau c\u1ea7u n\u00e0y v\u00ec {safe_reason}. "
-                    "Orbit t\u1eadp trung v\u00e0o c\u00f4ng vi\u1ec7c, l\u1ecbch, nhi\u1ec7m v\u1ee5, memory v\u00e0 ph\u00e2n t\u00edch "
-                    "c\u00e1c cu\u1ed9c tr\u00f2 chuy\u1ec7n \u0111\u00e3 \u0111\u01b0\u1ee3c c\u1ea5p quy\u1ec1n."
+                    f"Orbit không thể hỗ trợ yêu cầu này vì {safe_reason}. "
+                    "Orbit tập trung vào công việc, lịch, nhiệm vụ, memory và phân tích "
+                    "các cuộc trò chuyện đã được cấp quyền."
                 ),
             )
     metadata = {

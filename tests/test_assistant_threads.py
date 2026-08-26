@@ -59,9 +59,25 @@ async def test_conversation_scoped_chat_does_not_create_assistant_thread(
     not show up in the Personal Assistant's own "Gần đây" list."""
     _mock_reply(monkeypatch, fake_llm_factory, "Tóm tắt hội thoại.")
     other_me = await client.get("/api/v1/auth/me", headers=other_auth_headers)
-    other_id = other_me.json()["id"]
+    other = other_me.json()
+    workspace = (
+        await client.post(
+            "/api/v1/workspaces", json={"name": "Assistant thread test"}, headers=auth_headers
+        )
+    ).json()
+    await client.post(
+        f"/api/v1/workspaces/{workspace['id']}/members",
+        json={"email": other["email"], "role": "member"},
+        headers=auth_headers,
+    )
     conv = await client.post(
-        "/api/v1/conversations", json={"type": "direct", "participant_ids": [other_id]}, headers=auth_headers
+        "/api/v1/conversations",
+        json={
+            "type": "direct",
+            "participant_ids": [other["id"]],
+            "workspace_id": workspace["id"],
+        },
+        headers=auth_headers,
     )
     conversation_id = conv.json()["id"]
     await client.put(
@@ -118,6 +134,8 @@ async def test_touch_if_exists_never_creates_a_row(client):
     """A resume for a conversation-embedded interrupt (thread never touched by a personal-assistant
     chat() call) must not retroactively create an AssistantThread row."""
     async with db_session.async_session_maker() as db:
-        await assistant_thread_service.touch_if_exists(db, thread_id="never-existed", ai_preview="irrelevant")
+        await assistant_thread_service.touch_if_exists(
+            db, owner_id="whoever", thread_id="never-existed", ai_preview="irrelevant"
+        )
         threads = await assistant_thread_service.list_threads(db, owner_id="whoever")
     assert threads == []

@@ -38,4 +38,4 @@ async def test_list_memories_no_saved_memories():
 
 
 def test_list_memories_hidden_from_llm_tool_schema():
-    assert list(memory_tool.list_memories.args.keys()) == []
+    assert list(memory_tool.list_memories.args.keys()) == ["query", "limit"]

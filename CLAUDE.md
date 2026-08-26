@@ -78,7 +78,7 @@ uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 # Windows luôn chọn ProactorEventLoop trước khi app được import, không có cờ CLI nào sửa được.
 Health check: GET http://localhost:8000/health → {"status":"ok",...}
 Swagger UI: http://localhost:8000/docs
-DB: PostgreSQL bắt buộc qua DATABASE_URL trong .env (không có default, không còn hỗ trợ SQLite) — xem README.md để tạo database. Test suite dùng database Postgres riêng (orbit_test mặc định, đổi qua TEST_DATABASE_URL).
+DB: PostgreSQL bắt buộc qua DATABASE_URL trong .env (không có default, không có SQLite fallback cho development/production) — xem README.md để tạo database. Unit test dùng SQLite in-memory; integration test checkpoint PostgreSQL chạy khi có TEST_DATABASE_URL.
 Nếu sửa .env mà hành vi backend không đổi, kiểm tra có tiến trình uvicorn/scripts/run_dev.py cũ nào còn sống trên port 8000 trước khi nghi code sai — uvicorn --reload trên Windows để lại tiến trình con (spawn qua multiprocessing) vẫn giữ cổng dù tiến trình cha đã bị tắt, nhiều bản cũ/mới có thể cùng nhận request. Kiểm tra: netstat -ano | findstr :8000 rồi Stop-Process -Id <pid> -Force cho từng tiến trình tìm thấy, sau đó khởi động lại.
 Frontend — app người dùng (luôn cần khi phát triển/test)
 bash
@@ -117,10 +117,10 @@ Không commit file .env thật (chỉ .env.example).
 Tài liệu liên quan trong repo
 Frontend/README.md — hướng dẫn riêng cho frontend, gồm cách xử lý lỗi thường gặp khi chạy npm trên Windows.
 Frontend/detai.md — đề bài / yêu cầu gốc của dự án, tham khảo khi không chắc scope tính năng.
-ARCHITECTURE.md — kiến trúc hệ thống hiện tại, sơ đồ, quyết định công nghệ.
+docs/ARCHITECTURE.md — kiến trúc canonical hiện tại của Orbit (Personal Agent, không phải Multi-Agent — subsystem đó đã gỡ bỏ khỏi repo); ARCHITECTURE.md ở root là một bản mô tả "as implemented" chi tiết hơn, viết độc lập trước đó.
 ROADMAP.md — bảng đối chiếu từng yêu cầu đề bài với trạng thái thật + việc còn lại theo độ ưu tiên.
 WORKLOG.md — nhật ký công việc theo ngày của cả nhóm, xem để biết ai đang làm phần nào trước khi động vào.
-docs/guide/ — tài liệu khóa học AI20K (setup, LangGraph, FastAPI, testing, deploy).
+docs/README.md — mục lục và thứ tự ưu tiên của bộ tài liệu.
 Lưu ý an toàn khi code
 Không hardcode GOOGLE_API_KEY, GROQ_API_KEY hay bất kỳ secret nào vào code — luôn đọc từ .env.
 Khi agent thao tác với Google Calendar hoặc tạo nhắc nhở, giữ nguyên bước xác nhận người dùng trước khi gọi API thật; đây là yêu cầu thiết kế cốt lõi của sản phẩm (human-in-the-loop), không phải chi tiết có thể lược bỏ để "cho gọn".

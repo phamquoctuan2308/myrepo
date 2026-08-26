@@ -1,0 +1,1054 @@
+<title>Orbit Demo Reel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  /* ===================================================================
+     TOKENS
+     Outer page: theme-aware (light/dark/system), per the 3-state pattern.
+     Inner .player "screen": a deliberately fixed dark cinema canvas —
+     like a video embed, it stays dark regardless of page theme. Its
+     tokens are plain values below, not swapped by media/[data-theme].
+     =================================================================== */
+  :root {
+    --page-bg: #f2f4fb;
+    --page-surface: #ffffff;
+    --page-line: #dde1f0;
+    --page-text: #171a2b;
+    --page-text-dim: #5b6178;
+    --accent: #4f63e0;
+    --accent-ink: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page-bg: #06070d;
+      --page-surface: #0e1120;
+      --page-line: #232742;
+      --page-text: #eceefa;
+      --page-text-dim: #8b90ac;
+      --accent: #7c8bf0;
+      --accent-ink: #0a0c16;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page-bg: #06070d;
+    --page-surface: #0e1120;
+    --page-line: #232742;
+    --page-text: #eceefa;
+    --page-text-dim: #8b90ac;
+    --accent: #7c8bf0;
+    --accent-ink: #0a0c16;
+  }
+
+  /* Fixed cinema-screen tokens (single visual world, by design) */
+  :root {
+    --stage-bg: #070a14;
+    --stage-surface: #10142a;
+    --stage-surface-2: #1a2140;
+    --stage-line: #262e52;
+    --stage-text: #eef1fb;
+    --stage-text-dim: #8891b8;
+    --stage-accent: #5b73f5;
+    --stage-accent-2: #8b5cf6;
+    --stage-good: #16c087;
+    --stage-warn: #f2a93c;
+    --stage-danger: #ef5675;
+  }
+
+  --font-display: "Sora", ui-sans-serif, system-ui, sans-serif;
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page-bg);
+    color: var(--page-text);
+    font-family: "Manrope", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent); color: var(--accent-ink); }
+
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: clamp(28px, 5vw, 64px) 20px 48px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  /* ---------------- header ---------------- */
+  .page-head {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.05rem;
+    letter-spacing: 0.01em;
+    color: var(--page-text);
+    width: fit-content;
+  }
+  .wordmark svg { width: 22px; height: 22px; color: var(--accent); }
+  .page-head h1 {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: clamp(1.5rem, 3.4vw, 2.15rem);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 2px 0 0;
+    text-wrap: balance;
+    max-width: 26ch;
+  }
+  .page-sub {
+    margin: 0;
+    color: var(--page-text-dim);
+    font-size: 0.95rem;
+    line-height: 1.55;
+    max-width: 62ch;
+  }
+  .page-sub code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.85em;
+    background: var(--page-surface);
+    border: 1px solid var(--page-line);
+    padding: 0.1em 0.4em;
+    border-radius: 5px;
+    color: var(--page-text);
+  }
+
+  /* ---------------- player frame ---------------- */
+  .player {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: var(--stage-bg);
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 30px 60px -30px rgba(6, 8, 20, 0.55), 0 1px 0 rgba(255,255,255,0.04) inset;
+    isolation: isolate;
+  }
+  .stage {
+    position: absolute;
+    inset: 0;
+  }
+  .scene {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.55s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6.5% 7%;
+    color: var(--stage-text);
+  }
+  .scene.active { opacity: 1; visibility: visible; }
+
+  .chapter-badge {
+    position: absolute;
+    top: 16px;
+    left: 18px;
+    z-index: 5;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--stage-text-dim);
+    background: rgba(7, 10, 20, 0.55);
+    border: 1px solid rgba(255,255,255,0.08);
+    padding: 5px 10px;
+    border-radius: 999px;
+    backdrop-filter: blur(6px);
+  }
+  .timecode {
+    position: absolute;
+    top: 16px;
+    right: 18px;
+    z-index: 5;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    color: var(--stage-text-dim);
+    font-variant-numeric: tabular-nums;
+    background: rgba(7, 10, 20, 0.55);
+    border: 1px solid rgba(255,255,255,0.08);
+    padding: 5px 10px;
+    border-radius: 999px;
+    backdrop-filter: blur(6px);
+  }
+
+  .caption-bar {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    z-index: 6;
+    padding: 34px 6% 16px;
+    background: linear-gradient(to top, rgba(4,5,10,0.88), rgba(4,5,10,0));
+    text-align: center;
+    pointer-events: none;
+  }
+  .caption-bar span {
+    display: inline-block;
+    font-size: clamp(0.85rem, 1.7vw, 1.05rem);
+    font-weight: 600;
+    line-height: 1.4;
+    color: #fbfbff;
+    text-shadow: 0 1px 6px rgba(0,0,0,0.5);
+    max-width: 46ch;
+  }
+
+  /* ---------------- transport controls ---------------- */
+  .transport {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .transport-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    border: 1px solid var(--page-line);
+    background: var(--page-surface);
+    color: var(--page-text);
+    cursor: pointer;
+    flex: none;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+  .transport-btn:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .transport-btn:active { transform: scale(0.94); }
+  .transport-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .transport-btn svg { width: 17px; height: 17px; }
+
+  .scrub {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(to right, var(--accent) var(--fill, 0%), var(--page-line) var(--fill, 0%));
+    outline: none;
+    cursor: pointer;
+  }
+  .scrub::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 15px; height: 15px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--page-surface);
+    box-shadow: 0 0 0 1px var(--accent);
+    cursor: pointer;
+  }
+  .scrub::-moz-range-thumb {
+    width: 15px; height: 15px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--page-surface);
+    cursor: pointer;
+  }
+  .scrub:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .scrub-time {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.78rem;
+    color: var(--page-text-dim);
+    font-variant-numeric: tabular-nums;
+    flex: none;
+    min-width: 4.5em;
+    text-align: right;
+  }
+
+  /* ---------------- chapters ---------------- */
+  .chapters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .chapter-chip {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.74rem;
+    letter-spacing: 0.02em;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 12px 7px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--page-line);
+    background: var(--page-surface);
+    color: var(--page-text-dim);
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  }
+  .chapter-chip .n {
+    font-weight: 600;
+    color: var(--page-text-dim);
+    background: var(--page-bg);
+    border-radius: 50%;
+    width: 18px; height: 18px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 0.68rem;
+  }
+  .chapter-chip:hover { border-color: var(--accent); color: var(--page-text); }
+  .chapter-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .chapter-chip.current {
+    border-color: var(--accent);
+    color: var(--page-text);
+    background: color-mix(in srgb, var(--accent) 14%, var(--page-surface));
+  }
+  .chapter-chip.current .n { background: var(--accent); color: var(--accent-ink); }
+
+  .page-foot {
+    color: var(--page-text-dim);
+    font-size: 0.82rem;
+    line-height: 1.6;
+    border-top: 1px solid var(--page-line);
+    padding-top: 16px;
+  }
+
+  /* ===================================================================
+     STAGE MOCKUP PRIMITIVES (fixed-dark tokens throughout)
+     =================================================================== */
+  .win {
+    width: 100%; height: 100%;
+    background: var(--stage-surface);
+    border: 1px solid var(--stage-line);
+    border-radius: 14px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 45px -25px rgba(0,0,0,0.6);
+  }
+  .win-bar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--stage-line);
+    flex: none;
+  }
+  .win-bar i { width: 8px; height: 8px; border-radius: 50%; background: var(--stage-line); }
+  .win-bar span {
+    margin-left: 8px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem;
+    color: var(--stage-text-dim);
+  }
+  .win-body { flex: 1; display: flex; min-height: 0; }
+
+  .avatar {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 0.65rem; font-weight: 700; color: #fff;
+    flex: none;
+  }
+  .bubble {
+    max-width: 72%;
+    padding: 8px 12px;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    line-height: 1.4;
+  }
+  .bubble.in { background: var(--stage-surface-2); color: var(--stage-text); border-bottom-left-radius: 4px; }
+  .bubble.out { background: var(--stage-accent); color: #fff; border-bottom-right-radius: 4px; margin-left: auto; }
+
+  .icon { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.65rem; font-weight: 600; letter-spacing: 0.03em;
+    padding: 3px 8px; border-radius: 999px;
+    text-transform: uppercase;
+  }
+  .pill.good { background: rgba(22,192,135,0.15); color: var(--stage-good); }
+  .pill.warn { background: rgba(242,169,60,0.15); color: var(--stage-warn); }
+  .pill.accent { background: rgba(91,115,245,0.16); color: var(--stage-accent); }
+
+  .btn {
+    font-family: "Manrope", sans-serif;
+    font-weight: 700;
+    font-size: 0.76rem;
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: none;
+    cursor: default;
+  }
+  .btn.primary { background: var(--stage-accent); color: #fff; }
+  .btn.ghost { background: var(--stage-surface-2); color: var(--stage-text); }
+
+  /* ============== Scene 1 — the problem (chaos) ============== */
+  #s1 .field { position: relative; width: 100%; height: 100%; }
+  #s1 .chat-chip {
+    position: absolute;
+    width: 168px;
+    padding: 9px 11px;
+    border-radius: 11px;
+    background: var(--stage-surface);
+    border: 1px solid var(--stage-line);
+    box-shadow: 0 12px 28px -16px rgba(0,0,0,0.7);
+  }
+  #s1 .chat-chip .grp {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.6rem; letter-spacing: 0.03em; text-transform: uppercase;
+    color: var(--stage-text-dim); margin-bottom: 3px;
+  }
+  #s1 .chat-chip .msg { font-size: 0.72rem; color: var(--stage-text); line-height: 1.3; }
+  #s1 .chat-chip.urgent { border-color: rgba(239,86,117,0.5); box-shadow: 0 0 0 1px rgba(239,86,117,0.25), 0 12px 28px -16px rgba(0,0,0,0.7); }
+  #s1 .vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, rgba(7,10,20,0) 35%, rgba(7,10,20,0.85) 100%);
+  }
+
+  /* ============== Scene 2 — meet orbit ============== */
+  #s2 .win-body { }
+  #s2 .rail {
+    width: 58px; flex: none;
+    border-right: 1px solid var(--stage-line);
+    display: flex; flex-direction: column; align-items: center;
+    gap: 12px; padding: 14px 0;
+  }
+  #s2 .thread { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #s2 .thread-head {
+    padding: 10px 14px; border-bottom: 1px solid var(--stage-line);
+    display: flex; align-items: center; gap: 8px;
+    font-size: 0.8rem; font-weight: 700;
+  }
+  #s2 .dot-online { width: 7px; height: 7px; border-radius: 50%; background: var(--stage-good); }
+  #s2 .thread-body { flex: 1; padding: 14px; display: flex; flex-direction: column; gap: 8px; justify-content: flex-end; }
+  #s2 .composer { padding: 10px 14px; border-top: 1px solid var(--stage-line); display: flex; align-items: center; gap: 10px; }
+  #s2 .orbit-mark {
+    width: 30px; height: 30px; border-radius: 9px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--stage-surface-2); color: var(--stage-accent);
+    animation: markGlow 2.6s ease-in-out infinite;
+  }
+  #s2 .composer-input { flex: 1; height: 30px; border-radius: 8px; background: var(--stage-surface-2); }
+  #s2 .drawer {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: 40%; min-width: 210px;
+    background: var(--stage-surface);
+    border-left: 1px solid var(--stage-line);
+    padding: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+    animation: drawerIn 0.6s cubic-bezier(.2,.8,.2,1) both;
+    animation-delay: 1.5s;
+  }
+  #s2 .drawer h4 { margin: 0; font-family: var(--font-display); font-size: 0.92rem; }
+  #s2 .drawer p { margin: 0; font-size: 0.72rem; color: var(--stage-text-dim); line-height: 1.5; }
+  #s2 .perm-card {
+    border: 1px solid var(--stage-line); border-radius: 10px; padding: 10px;
+    background: var(--stage-surface-2);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  @keyframes markGlow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(91,115,245,0.0); }
+    50% { box-shadow: 0 0 0 8px rgba(91,115,245,0.18); }
+  }
+  @keyframes drawerIn {
+    from { transform: translateX(16px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  /* ============== Scene 3 — proactive + human-in-the-loop ============== */
+  #s3 .layout { width: 100%; height: 100%; display: flex; gap: 14px; }
+  #s3 .chatcol { flex: 1.15; min-width: 0; }
+  #s3 .panel { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  #s3 .thread-body { flex: 1; padding: 14px; display: flex; flex-direction: column; gap: 8px; justify-content: flex-end; }
+  #s3 .typing { display: inline-flex; gap: 3px; padding: 8px 12px; }
+  #s3 .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--stage-text-dim); animation: typeDot 1s infinite ease-in-out; }
+  #s3 .typing i:nth-child(2) { animation-delay: 0.15s; }
+  #s3 .typing i:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes typeDot { 0%,60%,100% { opacity: 0.25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+  #s3 .msg-in { animation: msgReveal 0.4s ease both; animation-delay: 1.6s; }
+  #s3 .msg-typing { animation: msgHide 0.4s ease both; animation-delay: 1.6s; }
+  @keyframes msgReveal { from { opacity: 0; height: 0; } to { opacity: 1; } }
+  @keyframes msgHide { to { opacity: 0; height: 0; padding: 0; margin: 0; overflow: hidden; } }
+
+  #s3 .toast {
+    display: flex; align-items: center; gap: 9px;
+    background: var(--stage-surface); border: 1px solid var(--stage-line);
+    border-radius: 10px; padding: 10px 12px;
+    box-shadow: 0 14px 30px -16px rgba(0,0,0,0.7);
+    opacity: 0;
+    animation: toastPop 0.5s cubic-bezier(.2,.9,.25,1.2) both;
+    animation-delay: 2.4s;
+  }
+  #s3 .toast .flag { width: 26px; height: 26px; border-radius: 8px; background: rgba(239,86,117,0.16); color: var(--stage-danger); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  #s3 .toast strong { font-size: 0.76rem; display: block; }
+  #s3 .toast small { font-size: 0.66rem; color: var(--stage-text-dim); }
+  @keyframes toastPop { from { opacity: 0; transform: translateY(10px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+  #s3 .confirm-card {
+    border: 1px solid var(--stage-line); border-radius: 10px; padding: 12px;
+    background: var(--stage-surface-2);
+    opacity: 0;
+    animation: cardIn 0.5s ease both;
+    animation-delay: 5.5s;
+  }
+  @keyframes cardIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  #s3 .confirm-card p { margin: 0 0 10px; font-size: 0.76rem; line-height: 1.4; }
+  #s3 .confirm-actions { display: flex; gap: 8px; position: relative; }
+  #s3 .cursor {
+    position: absolute; width: 13px; height: 13px; border-radius: 50%;
+    background: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,0.15);
+    left: 62px; top: -34px;
+    opacity: 0;
+    animation: cursorMove 1.4s ease both;
+    animation-delay: 6.4s;
+  }
+  @keyframes cursorMove {
+    0% { opacity: 0; left: 130px; top: -10px; }
+    30% { opacity: 1; left: 130px; top: -10px; }
+    85% { left: 26px; top: -6px; }
+    100% { opacity: 1; left: 26px; top: -6px; }
+  }
+  #s3 .btn-confirm.clicked { animation: btnPulse 0.5s ease; animation-delay: 7.8s; }
+  @keyframes btnPulse { 40% { box-shadow: 0 0 0 6px rgba(22,192,135,0.35); } }
+  #s3 .success {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 0.76rem; font-weight: 700; color: var(--stage-good);
+    opacity: 0;
+    animation: cardIn 0.4s ease both;
+    animation-delay: 8.4s;
+  }
+
+  /* ============== Scene 4 — summarize / inbox / calendar ============== */
+  #s4 .track { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 14px; }
+  #s4 .beat {
+    position: absolute; inset: 0;
+    opacity: 0;
+    animation: beatShow 37s ease-in-out infinite;
+  }
+  #s4 .beat.b1 { animation-delay: 0s; }
+  #s4 .beat.b2 { animation-delay: -24.3s; } /* shows during 13s..25s window */
+  #s4 .beat.b3 { animation-delay: -13s; } /* shows during ~24s..36s window, no wrap-glitch at scene start */
+  @keyframes beatShow {
+    0%   { opacity: 1; }
+    32%  { opacity: 1; }
+    35%  { opacity: 0; }
+    100% { opacity: 0; }
+  }
+
+  #s4 .msglist { display: flex; flex-direction: column; gap: 6px; padding: 14px; height: 100%; overflow: hidden; }
+  #s4 .msglist .row { display: flex; gap: 8px; align-items: center; }
+  #s4 .msglist .row .b { flex: 1; height: 20px; border-radius: 6px; background: var(--stage-surface-2); }
+  #s4 .scrollwrap { animation: scrollUp 3.2s ease-in-out 0.3s both; }
+  @keyframes scrollUp { from { transform: translateY(0); } to { transform: translateY(-140px); } }
+  #s4 .summary-card {
+    position: absolute; left: 6%; right: 6%; bottom: 8%;
+    background: var(--stage-surface); border: 1px solid var(--stage-line);
+    border-radius: 10px; padding: 12px;
+    opacity: 0; animation: cardIn 0.5s ease both; animation-delay: 4.2s;
+  }
+  #s4 .summary-card p { margin: 4px 0 0; font-size: 0.75rem; line-height: 1.45; color: var(--stage-text-dim); }
+
+  #s4 .inbox-list { display: flex; flex-direction: column; gap: 8px; padding: 16px; }
+  #s4 .inbox-item {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--stage-line); border-radius: 10px; padding: 10px;
+    background: var(--stage-surface-2);
+  }
+  #s4 .inbox-item.pick { border-color: rgba(91,115,245,0.5); }
+  #s4 .inbox-item .t { flex: 1; min-width: 0; }
+  #s4 .inbox-item .t strong { display: block; font-size: 0.78rem; }
+  #s4 .inbox-item .t small { color: var(--stage-text-dim); font-size: 0.66rem; }
+  #s4 .accept-btn { opacity: 0; animation: cardIn 0.4s ease both; animation-delay: 1s; }
+  #s4 .accept-btn.clicked { animation: btnPulse 0.5s ease both, cardIn 0.4s ease both; animation-delay: 1s, 1s; }
+
+  #s4 .cal { padding: 16px; display: flex; flex-direction: column; gap: 10px; height: 100%; }
+  #s4 .cal-strip { display: grid; grid-template-columns: repeat(7,1fr); gap: 6px; flex: 1; }
+  #s4 .cal-cell { border: 1px solid var(--stage-line); border-radius: 8px; padding: 6px; font-size: 0.62rem; color: var(--stage-text-dim); display: flex; flex-direction: column; gap: 4px; }
+  #s4 .cal-cell.today { border-color: rgba(91,115,245,0.5); }
+  #s4 .cal-event {
+    background: var(--stage-accent); color: #fff; border-radius: 5px;
+    padding: 2px 5px; font-size: 0.6rem; font-weight: 700;
+    opacity: 0; transform: scale(0.7);
+    animation: evtPop 0.45s cubic-bezier(.2,.9,.25,1.3) both;
+    animation-delay: 1.4s;
+  }
+  @keyframes evtPop { to { opacity: 1; transform: scale(1); } }
+
+  /* ============== Scene 5 — privacy ============== */
+  #s5 .privacy { display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; max-width: 480px; margin: 0 auto; }
+  #s5 .lock-badge {
+    width: 56px; height: 56px; border-radius: 16px;
+    background: var(--stage-surface); border: 1px solid var(--stage-line);
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--stage-accent);
+  }
+  #s5 .toggle { display: inline-flex; align-items: center; gap: 10px; }
+  #s5 .switch { width: 40px; height: 22px; border-radius: 999px; background: var(--stage-surface-2); position: relative; border: 1px solid var(--stage-line); }
+  #s5 .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%; background: var(--stage-text-dim);
+    animation: flipOn 0.4s ease both; animation-delay: 1s;
+  }
+  #s5 .switch.on { animation: switchBg 0.4s ease both; animation-delay: 1s; }
+  @keyframes flipOn { to { left: 20px; background: #fff; } }
+  @keyframes switchBg { to { background: var(--stage-good); border-color: var(--stage-good); } }
+  #s5 .lines { display: flex; flex-direction: column; gap: 9px; }
+  #s5 .lines div { font-size: 0.86rem; opacity: 0; animation: lineUp 0.5s ease both; }
+  #s5 .lines div:nth-child(1) { animation-delay: 1.6s; }
+  #s5 .lines div:nth-child(2) { animation-delay: 2.4s; }
+  #s5 .lines div:nth-child(3) { animation-delay: 3.2s; }
+  @keyframes lineUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ============== Scene 6 — agent workspace ============== */
+  #s6 .zoomstage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #s6 .grid3 {
+    display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; width: 100%; max-width: 620px;
+    animation: gridIn 0.6s ease both; animation-delay: 0.6s;
+  }
+  @keyframes gridIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+  #s6 .ws-card { border: 1px solid var(--stage-line); border-radius: 12px; padding: 12px; background: var(--stage-surface); }
+  #s6 .ws-card .tag { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.6rem; text-transform: uppercase; color: var(--stage-text-dim); letter-spacing: 0.04em; }
+  #s6 .ws-card h5 { margin: 6px 0 0; font-size: 0.82rem; }
+  #s6 .brief {
+    grid-column: 1 / -1;
+    border-color: rgba(91,115,245,0.5);
+    opacity: 0; animation: cardIn 0.5s ease both; animation-delay: 2.1s;
+  }
+  #s6 .brief p { margin: 6px 0 0; font-size: 0.74rem; color: var(--stage-text-dim); }
+
+  /* ============== Scene 7 — closing ============== */
+  #s7 .closing { display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; }
+  #s7 .closing .mark {
+    width: 60px; height: 60px; color: var(--stage-accent);
+    opacity: 0; animation: cardIn 0.6s ease both; animation-delay: 0.2s;
+  }
+  #s7 h2 { font-family: var(--font-display); font-size: clamp(1.3rem, 3vw, 1.8rem); margin: 0; opacity: 0; animation: cardIn 0.6s ease both; animation-delay: 0.7s; }
+  #s7 .chips { display: flex; gap: 10px; opacity: 0; animation: cardIn 0.6s ease both; animation-delay: 1.4s; }
+  #s7 .tag {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem; padding: 6px 12px; border-radius: 999px;
+    border: 1px solid var(--stage-line); color: var(--stage-text-dim);
+  }
+  #s7 .slogan { font-size: 0.9rem; color: var(--stage-text-dim); opacity: 0; animation: cardIn 0.6s ease both; animation-delay: 2s; max-width: 40ch; }
+
+  /* respect reduced motion: keep essential crossfades, drop decorative motion */
+  @media (prefers-reduced-motion: reduce) {
+    .scene, .transport-btn, .chapter-chip { transition-duration: 0.01ms !important; }
+    #s2 .orbit-mark, #s3 .cursor, #s4 .scrollwrap, #s4 .beat { animation: none !important; opacity: 1 !important; transform: none !important; }
+    #s1 .chat-chip { animation: none !important; }
+  }
+
+  @media (max-width: 620px) {
+    .page-sub { max-width: 100%; }
+    .caption-bar span { max-width: 34ch; }
+  }
+</style>
+
+<!-- shared icon defs -->
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="ic-orbit" viewBox="0 0 32 32">
+    <circle cx="16" cy="16" r="12.5" fill="none" stroke="currentColor" stroke-width="2" opacity="0.55"/>
+    <circle cx="16" cy="16" r="3.2" fill="currentColor"/>
+    <circle cx="26.5" cy="10.5" r="2" fill="currentColor"/>
+  </symbol>
+  <symbol id="ic-check" viewBox="0 0 20 20">
+    <circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <path d="M6 10.2l2.6 2.6L14 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="ic-flag" viewBox="0 0 16 16">
+    <path d="M3.5 1.5v13M3.5 2h9l-2.2 2.5L12.5 7h-9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="ic-lock" viewBox="0 0 20 24">
+    <rect x="3" y="10" width="14" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <path d="M6 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  </symbol>
+  <symbol id="ic-play" viewBox="0 0 20 20"><path d="M6 4l11 6-11 6V4z" fill="currentColor"/></symbol>
+  <symbol id="ic-pause" viewBox="0 0 20 20"><rect x="5" y="4" width="4" height="12" fill="currentColor"/><rect x="11" y="4" width="4" height="12" fill="currentColor"/></symbol>
+  <symbol id="ic-restart" viewBox="0 0 20 20">
+    <path d="M4 10a6 6 0 1 1 1.9 4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M4 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+</svg>
+
+<div class="page">
+
+  <header class="page-head">
+    <div class="wordmark"><svg class="icon"><use href="#ic-orbit"/></svg>Orbit</div>
+    <h1>Demo reel — trợ lý AI cá nhân trong chat</h1>
+    <p class="page-sub">
+      Dựng từ kịch bản &amp; phụ đề 3 phút đã chốt — mô phỏng lại giao diện Orbit thật để xem trước nhịp phim
+      trước khi quay. Bấm <strong>Play</strong>, hoặc nhảy thẳng tới từng chương bên dưới. Không có audio thật —
+      phần lời thoại hiển thị dưới dạng phụ đề, khớp với <code>demo_video_script.srt</code>.
+    </p>
+  </header>
+
+  <div class="player" id="player">
+    <div class="stage" id="stage">
+
+      <div class="scene" id="s1" data-scene="s1">
+        <div class="field">
+          <div class="chat-chip" style="top:8%; left:4%;"><div class="grp">Gia đình</div><div class="msg">Tối nay ăn gì cả nhà ơi...</div></div>
+          <div class="chat-chip urgent" style="top:14%; left:58%;"><div class="grp">Đối tác Kim Long</div><div class="msg">Họp gấp 9h sáng mai nhé...</div></div>
+          <div class="chat-chip" style="top:38%; left:22%;"><div class="grp">Dự án Aurora</div><div class="msg">Deadline dời sang thứ Năm...</div></div>
+          <div class="chat-chip" style="top:30%; left:74%;"><div class="grp">Sales Q3</div><div class="msg">Chốt số liệu trước 17h chiều...</div></div>
+          <div class="chat-chip urgent" style="top:58%; left:6%;"><div class="grp">Ban giám đốc</div><div class="msg">Review roadmap tuần sau...</div></div>
+          <div class="chat-chip" style="top:64%; left:52%;"><div class="grp">Vận hành</div><div class="msg">Server báo lỗi lúc 2h sáng...</div></div>
+          <div class="chat-chip" style="top:6%; left:32%;"><div class="grp">CLB Bóng đá</div><div class="msg">Chủ nhật đá sân nào anh em?</div></div>
+          <div class="chat-chip" style="top:76%; left:30%;"><div class="grp">Marketing</div><div class="msg">Duyệt content trước sáng mai...</div></div>
+          <div class="chat-chip" style="top:48%; left:44%;"><div class="grp">Đối tác Kim Long</div><div class="msg">Anh xác nhận giúp em nhé!</div></div>
+          <div class="vignette"></div>
+        </div>
+      </div>
+
+      <div class="scene" id="s2" data-scene="s2">
+        <div class="win">
+          <div class="win-bar"><i></i><i></i><i></i><span>Orbit — Chat</span></div>
+          <div class="win-body">
+            <div class="rail">
+              <div class="avatar" style="background:#5b73f5">Q</div>
+              <div class="avatar" style="background:#8b5cf6">D</div>
+              <div class="avatar" style="background:#16c087">S</div>
+            </div>
+            <div class="thread">
+              <div class="thread-head"><span class="dot-online"></span>Quỳnh</div>
+              <div class="thread-body">
+                <div class="bubble in">Chiều nay rảnh không?</div>
+                <div class="bubble out">Có, có gì không em?</div>
+              </div>
+              <div class="composer">
+                <div class="orbit-mark"><svg class="icon" style="width:16px;height:16px"><use href="#ic-orbit"/></svg></div>
+                <div class="composer-input"></div>
+              </div>
+            </div>
+            <div class="drawer">
+              <h4>AI Assistant</h4>
+              <div class="perm-card">
+                <strong style="font-size:0.76rem">Permission granted</strong>
+                <p>AI có thể đọc hội thoại này khi bạn cho phép.</p>
+              </div>
+              <p>Context-aware · đọc hộ bạn, không tự ý hành động.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="scene" id="s3" data-scene="s3">
+        <div class="layout">
+          <div class="chatcol win">
+            <div class="win-bar"><i></i><i></i><i></i><span>Quỳnh</span></div>
+            <div class="thread-body">
+              <div class="msg-typing typing"><i></i><i></i><i></i></div>
+              <div class="msg-in bubble in" style="height:0;overflow:hidden">Mai họp gấp với đối tác lúc 9h nhé</div>
+              <div class="toast">
+                <span class="flag"><svg class="icon"><use href="#ic-flag"/></svg></span>
+                <span><strong>Task được đề xuất</strong><small>Mai họp gấp với đối tác · 9:00</small></span>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="confirm-card">
+              <p><strong>Orbit:</strong> Tạo nhắc nhở cho cuộc họp lúc 9h sáng mai nhé?</p>
+              <div class="confirm-actions">
+                <div class="cursor"></div>
+                <button class="btn primary btn-confirm clicked">Xác nhận</button>
+                <button class="btn ghost">Huỷ</button>
+              </div>
+            </div>
+            <div class="success"><svg class="icon"><use href="#ic-check"/></svg>Đã tạo nhắc nhở</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="scene" id="s4" data-scene="s4">
+        <div class="track">
+          <div class="beat b1 win">
+            <div class="win-bar"><i></i><i></i><i></i><span>Dự án Aurora — 214 tin nhắn</span></div>
+            <div class="win-body" style="flex-direction:column">
+              <div class="msglist" style="flex:1; position:relative; overflow:hidden">
+                <div class="scrollwrap">
+                  <div class="row"><div class="avatar" style="background:#5b73f5;width:18px;height:18px"></div><div class="b"></div></div>
+                  <div class="row"><div class="avatar" style="background:#8b5cf6;width:18px;height:18px"></div><div class="b" style="width:70%"></div></div>
+                  <div class="row"><div class="avatar" style="background:#16c087;width:18px;height:18px"></div><div class="b"></div></div>
+                  <div class="row"><div class="avatar" style="background:#5b73f5;width:18px;height:18px"></div><div class="b" style="width:55%"></div></div>
+                  <div class="row"><div class="avatar" style="background:#f2a93c;width:18px;height:18px"></div><div class="b"></div></div>
+                  <div class="row"><div class="avatar" style="background:#8b5cf6;width:18px;height:18px"></div><div class="b" style="width:80%"></div></div>
+                  <div class="row"><div class="avatar" style="background:#16c087;width:18px;height:18px"></div><div class="b"></div></div>
+                  <div class="row"><div class="avatar" style="background:#5b73f5;width:18px;height:18px"></div><div class="b" style="width:65%"></div></div>
+                </div>
+              </div>
+              <div class="summary-card">
+                <span class="pill accent">Summary</span>
+                <p>Nhóm chốt ra mắt bản beta thứ Sáu, cần gửi báo cáo QA trước 17h thứ Năm.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="beat b2 win">
+            <div class="win-bar"><i></i><i></i><i></i><span>Task Inbox — cần quyết định</span></div>
+            <div class="inbox-list">
+              <div class="inbox-item pick">
+                <span class="flag" style="width:24px;height:24px;border-radius:7px;background:rgba(91,115,245,0.16);color:var(--stage-accent);display:inline-flex;align-items:center;justify-content:center"><svg class="icon"><use href="#ic-flag"/></svg></span>
+                <span class="t"><strong>Mai họp lúc 9h</strong><small>AI suggestion · Medium</small></span>
+                <button class="btn primary accept-btn clicked">Accept</button>
+              </div>
+              <div class="inbox-item">
+                <span class="flag" style="width:24px;height:24px;border-radius:7px;background:var(--stage-surface-2);color:var(--stage-text-dim);display:inline-flex;align-items:center;justify-content:center"><svg class="icon"><use href="#ic-flag"/></svg></span>
+                <span class="t"><strong>Gửi báo cáo QA</strong><small>AI suggestion · High</small></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="beat b3 win">
+            <div class="win-bar"><i></i><i></i><i></i><span>Calendar — Google Calendar thật</span></div>
+            <div class="cal">
+              <span class="pill good">Đã đồng bộ 2 chiều</span>
+              <div class="cal-strip">
+                <div class="cal-cell">T2<span></span></div>
+                <div class="cal-cell">T3<span></span></div>
+                <div class="cal-cell today">T4<span class="cal-event">9:00 Họp</span></div>
+                <div class="cal-cell">T5<span></span></div>
+                <div class="cal-cell">T6<span></span></div>
+                <div class="cal-cell">T7<span></span></div>
+                <div class="cal-cell">CN<span></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="scene" id="s5" data-scene="s5">
+        <div class="privacy">
+          <div class="lock-badge"><svg class="icon" style="width:24px;height:24px"><use href="#ic-lock"/></svg></div>
+          <div class="toggle"><span class="switch on"></span><span style="font-size:0.82rem;font-weight:700">Grant Permission</span></div>
+          <div class="lines">
+            <div>Bạn tự cấp quyền cho từng hội thoại.</div>
+            <div>Thu hồi bất cứ lúc nào, hiệu lực ngay.</div>
+            <div>Minh bạch nội dung gửi đi — không có gì diễn ra sau lưng bạn.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="scene" id="s6" data-scene="s6">
+        <div class="zoomstage">
+          <div class="grid3">
+            <div class="ws-card"><span class="tag">Product Delivery</span><h5>Sprint 14</h5></div>
+            <div class="ws-card"><span class="tag">Quality Assurance</span><h5>Release v2.3</h5></div>
+            <div class="ws-card"><span class="tag">Executive</span><h5>Company Brief</h5></div>
+            <div class="ws-card brief">
+              <span class="pill good">READY</span>
+              <p><strong style="color:var(--stage-text)">Bản v2.3 sẵn sàng phát hành</strong> — 0 bug chặn release, coverage test 94%. Tự tổng hợp lúc 08:00 sáng nay.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="scene" id="s7" data-scene="s7">
+        <div class="closing">
+          <svg class="icon mark"><use href="#ic-orbit"/></svg>
+          <h2>Orbit</h2>
+          <div class="chips">
+            <span class="tag">Chủ động</span>
+            <span class="tag">An toàn</span>
+            <span class="tag">Đồng bộ</span>
+          </div>
+          <p class="slogan">Không để bất kỳ việc gì trôi qua trong tin nhắn.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="chapter-badge" id="chapterBadge">01 · Vấn đề</div>
+    <div class="timecode" id="timecode">00:00 / 02:58</div>
+    <div class="caption-bar"><span id="captionText">&nbsp;</span></div>
+  </div>
+
+  <div class="transport">
+    <button class="transport-btn" id="playBtn" aria-label="Phát"><svg class="icon" id="playIcon"><use href="#ic-play"/></svg></button>
+    <button class="transport-btn" id="restartBtn" aria-label="Bắt đầu lại"><svg class="icon"><use href="#ic-restart"/></svg></button>
+    <input class="scrub" id="scrub" type="range" min="0" max="178" step="0.1" value="0" aria-label="Tua video">
+    <span class="scrub-time" id="scrubTime">00:00 / 02:58</span>
+  </div>
+
+  <nav class="chapters" id="chapters" aria-label="Chương"></nav>
+
+  <footer class="page-foot">
+    Đây là bản mô phỏng dựng lại giao diện Orbit để xem trước nhịp phim — không phải bản ghi màn hình app thật.
+    Dùng để duyệt kịch bản, hoặc quay lại màn hình này làm nền khi chưa quay được app thật.
+  </footer>
+</div>
+
+<script>
+(function () {
+  var scenes = [
+    { id: 's1', start: 0,   end: 20,  label: 'Vấn đề' },
+    { id: 's2', start: 20,  end: 38,  label: 'Gặp Orbit' },
+    { id: 's3', start: 38,  end: 78,  label: 'Chủ động & Xác nhận' },
+    { id: 's4', start: 78,  end: 115, label: 'Tóm tắt & Đồng bộ' },
+    { id: 's5', start: 115, end: 138, label: 'Bảo mật' },
+    { id: 's6', start: 138, end: 162, label: 'Agent Workspace' },
+    { id: 's7', start: 162, end: 178, label: 'Kết' }
+  ];
+  var DURATION = 178;
+
+  var captions = [
+    [0.5,4.2,"Mỗi ngày, hàng trăm tin nhắn đổ về từ hàng chục nhóm chat."],
+    [4.4,6.3,"Một lời hẹn họp. Một deadline."],
+    [6.5,8.7,"Một lời hứa với đối tác."],
+    [8.9,10.8,"Tất cả bị chôn vùi —"],
+    [11.0,14.8,"và bạn chỉ nhận ra khi đã quá muộn."],
+    [20.5,24.5,"Đây là Orbit — trợ lý AI cá nhân, sống ngay bên trong app chat của bạn."],
+    [24.7,26.6,"Không cần chuyển app."],
+    [26.8,28.4,"Không cần nhớ."],
+    [28.7,33.0,"Orbit đọc hộ bạn — và luôn hỏi trước khi hành động."],
+    [38.5,43.0,"Không cần ai mở app lên yêu cầu — Orbit tự phát hiện ngay lời hẹn trong tin nhắn,"],
+    [43.2,46.0,"và chủ động gợi ý tạo nhắc việc."],
+    [46.3,49.5,"Nhưng Orbit không bao giờ tự ý hành động thay bạn."],
+    [49.8,54.5,"Mọi thao tác ghi lịch, gửi nhắc nhở — đều dừng lại, chờ đúng một cú xác nhận từ bạn."],
+    [54.8,59.0,"An toàn tuyệt đối, quyết định luôn ở trong tay người dùng."],
+    [78.5,83.5,"Với một cuộc trò chuyện dài hàng trăm tin nhắn, chỉ một cú bấm —"],
+    [83.8,86.5,"Orbit tóm tắt toàn bộ,"],
+    [86.8,91.5,"và trích xuất chính xác từng việc cần làm vào Task Inbox —"],
+    [91.8,94.5,"nơi ưu tiên đúng việc cần xử lý trước."],
+    [94.8,98.5,"Chấp nhận một gợi ý, Orbit tự đồng bộ thẳng lên Google Calendar thật —"],
+    [98.8,103.5,"hai chiều, luôn khớp dữ liệu, không một thao tác thủ công nào."],
+    [115.5,119.0,"Và Orbit chỉ đọc những gì bạn cho phép."],
+    [119.3,123.5,"Mỗi hội thoại, bạn tự cấp quyền — và có thể thu hồi bất cứ lúc nào."],
+    [123.8,128.0,"Mọi nội dung gửi đi đều minh bạch, không có gì diễn ra sau lưng bạn."],
+    [138.5,143.0,"Ở quy mô đội nhóm, Orbit còn mở rộng thành các Agent theo từng phòng ban —"],
+    [143.3,147.5,"tự tổng hợp báo cáo tình trạng công việc theo thời gian thực,"],
+    [147.8,151.5,"để người quản lý không còn phải gom số liệu thủ công."],
+    [162.5,166.0,"Orbit — không để bất kỳ việc gì trôi qua trong tin nhắn."],
+    [166.3,170.0,"Chủ động, an toàn, và luôn đồng hành cùng bạn."]
+  ];
+
+  var stage = document.getElementById('stage');
+  var chapterBadge = document.getElementById('chapterBadge');
+  var timecode = document.getElementById('timecode');
+  var captionText = document.getElementById('captionText');
+  var playBtn = document.getElementById('playBtn');
+  var playIcon = document.getElementById('playIcon');
+  var restartBtn = document.getElementById('restartBtn');
+  var scrub = document.getElementById('scrub');
+  var scrubTime = document.getElementById('scrubTime');
+  var chaptersNav = document.getElementById('chapters');
+
+  scrub.max = String(DURATION);
+
+  scenes.forEach(function (sc, i) {
+    var chip = document.createElement('button');
+    chip.className = 'chapter-chip';
+    chip.type = 'button';
+    chip.dataset.id = sc.id;
+    var n = document.createElement('span');
+    n.className = 'n';
+    n.textContent = String(i + 1);
+    chip.appendChild(n);
+    chip.appendChild(document.createTextNode(sc.label));
+    chip.addEventListener('click', function () {
+      t = sc.start;
+      playing = true;
+      lastTs = null;
+      render(t);
+      requestAnimationFrame(tick);
+    });
+    chaptersNav.appendChild(chip);
+  });
+  var chapterChips = Array.prototype.slice.call(chaptersNav.children);
+
+  function fmt(sec) {
+    sec = Math.max(0, sec);
+    var m = Math.floor(sec / 60);
+    var s = Math.floor(sec % 60);
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  var t = 0;
+  var playing = false;
+  var lastTs = null;
+  var activeSceneId = null;
+  var activeCaption = null;
+  var activeChapterIdx = -1;
+
+  function findScene(time) {
+    for (var i = 0; i < scenes.length; i++) {
+      if (time >= scenes[i].start && time < scenes[i].end) return i;
+    }
+    return scenes.length - 1;
+  }
+  function findCaption(time) {
+    for (var i = 0; i < captions.length; i++) {
+      if (time >= captions[i][0] && time < captions[i][1]) return captions[i][2];
+    }
+    return null;
+  }
+
+  function render(time) {
+    var idx = findScene(time);
+    var sc = scenes[idx];
+    if (sc.id !== activeSceneId) {
+      activeSceneId = sc.id;
+      var els = stage.querySelectorAll('.scene');
+      for (var i = 0; i < els.length; i++) els[i].classList.toggle('active', els[i].id === sc.id);
+      chapterBadge.textContent = (idx + 1 < 10 ? '0' : '') + (idx + 1) + ' · ' + sc.label;
+      if (idx !== activeChapterIdx) {
+        activeChapterIdx = idx;
+        chapterChips.forEach(function (chip, ci) { chip.classList.toggle('current', ci === idx); });
+      }
+    }
+    var cap = findCaption(time);
+    if (cap !== activeCaption) {
+      activeCaption = cap;
+      captionText.textContent = cap || ' ';
+    }
+    var label = fmt(time) + ' / ' + fmt(DURATION);
+    timecode.textContent = label;
+    scrubTime.textContent = label;
+    scrub.value = time;
+    scrub.style.setProperty('--fill', (time / DURATION * 100) + '%');
+  }
+
+  function tick(now) {
+    if (!playing) { lastTs = null; return; }
+    if (lastTs == null) lastTs = now;
+    var dt = (now - lastTs) / 1000;
+    lastTs = now;
+    t += dt;
+    if (t >= DURATION) {
+      t = DURATION;
+      playing = false;
+      playIcon.innerHTML = '<use href="#ic-play"/>';
+      render(t);
+      return;
+    }
+    render(t);
+    requestAnimationFrame(tick);
+  }
+
+  playBtn.addEventListener('click', function () {
+    if (!playing) {
+      if (t >= DURATION) t = 0;
+      playing = true;
+      lastTs = null;
+      playIcon.innerHTML = '<use href="#ic-pause"/>';
+      requestAnimationFrame(tick);
+    } else {
+      playing = false;
+      playIcon.innerHTML = '<use href="#ic-play"/>';
+    }
+  });
+
+  restartBtn.addEventListener('click', function () {
+    t = 0;
+    lastTs = null;
+    render(0);
+    if (!playing) { playing = true; playIcon.innerHTML = '<use href="#ic-pause"/>'; requestAnimationFrame(tick); }
+  });
+
+  scrub.addEventListener('input', function () {
+    playing = false;
+    playIcon.innerHTML = '<use href="#ic-play"/>';
+    t = parseFloat(scrub.value);
+    render(t);
+  });
+
+  render(0);
+})();
+</script>

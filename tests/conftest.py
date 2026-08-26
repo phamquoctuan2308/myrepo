@@ -1,128 +1,186 @@
-import asyncio
 import os
-import sys
 from unittest.mock import AsyncMock
 
-# Force tests onto a dedicated Postgres database - never the real dev DB - before any src.* import
-# below (get_settings() caches DATABASE_URL via @lru_cache on first call). Defaults to a sibling of
-# the dev DB configured in .env; override with TEST_DATABASE_URL (e.g. in CI).
-os.environ["DATABASE_URL"] = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql://postgres:123456@localhost:5432/orbit_test"
-)
-# Selects NullPool in src/db/session.py (see comment there) - tests run the app from more than
-# one event loop, which pooled asyncpg connections can't safely be shared across.
-os.environ.setdefault("APP_ENV", "test")
-# Off by default: the `client` fixture below reuses one `app` (and one in-memory slowapi limiter
-# on app.state.limiter) for the whole session, and fixtures like auth_headers/admin_auth_headers/
-# other_auth_headers each hit /auth/register once per test - dozens of tests in one session would
-# otherwise trip the real register limit against the test suite itself, not against real abuse.
-# tests/test_api/test_rate_limiting.py re-enables it explicitly to test the limiter itself.
-os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
+# Admin configuration tests validate provider/model selection, not a live provider call.
+os.environ.setdefault("GOOGLE_API_KEY", "test-google-api-key")
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
+# Tests must not inherit a developer's local PostgreSQL configuration. Set this before
+# importing application modules so the agent uses its isolated in-memory checkpointer.
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["SECRET_KEY"] = "test-only-secret-key-with-at-least-32-bytes"
+os.environ["RATE_LIMIT_ENABLED"] = "false"
+os.environ["ALLOW_SELF_SERVICE_ORGANIZATION_CREATION"] = "true"
+os.environ["CREDENTIAL_ENCRYPTION_KEY"] = "T3WGf3PaqPii2yO527bMcShobRNF3TpJ4sA3f9lkJkU="
 
 import src.db.session as db_session
-from src.agents import graph as agent_graph
 from src.db.base import Base
 from src.db.models import User
+from src.db.session import get_db
 from src.main import app
-from src.services import domain_classifier_service
+from src.services.domain_classifier_service import DomainAssessment
 
 
 @pytest.fixture(autouse=True)
-def _neutral_domain_classifier(monkeypatch):
-    """input_guardrail_node (src/agents/nodes/guardrail_node.py) falls back to
-    domain_classifier_service.classify_domain_request - a real LLM call - only for a message the
-    deterministic guardrail_service regexes didn't already resolve as work/small-talk/unsafe. Most
-    existing test fixtures use placeholder text ("Câu hỏi thật", generic tool-test prompts) that
-    doesn't match any of those keyword patterns, so without this they'd hit a real, unmocked LLM
-    call in every test run - slow, flaky, and unrelated to what each test actually verifies.
-    Default to "allow" here so an unrelated test's placeholder message reaches the planner exactly
-    as before this node existed; a test that specifically exercises the semantic classifier (see
-    tests/test_guardrails.py) overrides this again with its own monkeypatch, which simply wins for
-    that test."""
-
-    async def _allow(*args, **kwargs):
-        return domain_classifier_service.DomainAssessment(
-            decision="allow", intent="task_management", confidence=1.0, reason="test default"
+def _no_live_domain_classifier(monkeypatch):
+    """Unresolved domain checks use an LLM in production; tests opt into exact clarify/deny
+    behavior explicitly and otherwise keep existing fixtures deterministic/offline."""
+    async def allow_test_request(*args, **kwargs):
+        return DomainAssessment(
+            decision="allow",
+            intent="authorized_chat_analysis" if kwargs.get("conversation_mode") else "technical_work",
+            confidence=0.99,
+            reason="Allowed by deterministic test classifier.",
         )
 
-    monkeypatch.setattr(domain_classifier_service, "classify_domain_request", _allow)
-
-
-@pytest.fixture(scope="session")
-def event_loop_policy():
-    """AsyncPostgresSaver's psycopg async pool needs SelectorEventLoop on Windows - same
-    requirement as the real app server, see scripts/run_dev.py."""
-    if sys.platform == "win32":
-        return asyncio.WindowsSelectorEventLoopPolicy()
-    return asyncio.DefaultEventLoopPolicy()
+    monkeypatch.setattr(
+        "src.services.domain_classifier_service.classify_domain_request", allow_test_request
+    )
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
-async def _test_database():
-    """One-time setup/teardown for the whole test session: create the schema and the LangGraph
-    checkpointer tables against the dedicated test Postgres database."""
+async def _shared_schema():
+    """A few agent tests (test_graph.py, test_tools/test_calendar_tool.py) invoke
+    agent_graph.agent.ainvoke() directly instead of going through the `client` fixture, so they
+    never get its per-test schema/session-maker override. Since context_node now unconditionally
+    reads `memories`/`memory_episodes` on every graph run (input_guardrail -> context_builder),
+    those direct-invocation tests need the shared in-memory engine's schema created once up front,
+    or they hit "no such table: memories" the moment the graph touches the DB."""
     async with db_session.engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-    await agent_graph.init_checkpointer()
-    yield
-    await agent_graph.close_checkpointer()
-    async with db_session.engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await db_session.engine.dispose()
+
 
 
 @pytest_asyncio.fixture
-async def client(_test_database):
-    """Async HTTP client for testing API endpoints, backed by the shared test Postgres database -
-    truncates all tables after each test so tests stay isolated from one another."""
+async def client(monkeypatch):
+    """Async HTTP client backed by an isolated in-memory database."""
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    test_session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def override_get_db():
+        async with test_session_maker() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    monkeypatch.setattr("src.db.session.async_session_maker", test_session_maker)
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
-    async with db_session.engine.begin() as conn:
-        for table in reversed(Base.metadata.sorted_tables):
-            await conn.execute(table.delete())
+
+    app.dependency_overrides.pop(get_db, None)
+    await engine.dispose()
 
 
 @pytest_asyncio.fixture
 async def auth_headers(client):
     """Registers a test user and returns an Authorization header for it."""
-    resp = await client.post(
+    await client.post(
         "/api/v1/auth/register",
         json={"email": "alice@example.com", "password": "password123", "display_name": "Alice"},
+    )
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "alice@example.com", "password": "password123"},
     )
     token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest_asyncio.fixture
+async def personal_workspace(client, auth_headers):
+    """Returns the personal workspace created automatically at registration."""
+    resp = await client.get("/api/v1/workspaces", headers=auth_headers)
+    assert resp.status_code == 200
+    return next(workspace for workspace in resp.json() if workspace["type"] == "personal")
+
+
+@pytest_asyncio.fixture
 async def admin_auth_headers(client):
-    """Registers a test user, promotes it to admin directly in the test DB, and returns its header."""
-    resp = await client.post(
+    """Registers a test user with both legacy and platform admin roles."""
+    await client.post(
         "/api/v1/auth/register",
         json={"email": "admin@example.com", "password": "password123", "display_name": "Admin"},
     )
-    token = resp.json()["access_token"]
 
     async with db_session.async_session_maker() as session:
         user = (await session.execute(select(User).where(User.email == "admin@example.com"))).scalar_one()
         user.role = "admin"
+        user.platform_role = "platform_admin"
         await session.commit()
 
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "password123"},
+    )
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
+async def platform_admin_headers(client):
+    """Registers a platform admin without granting any workspace role."""
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": "platform@example.com", "password": "password123", "display_name": "Platform Admin"},
+    )
+
+    async with db_session.async_session_maker() as session:
+        user = (await session.execute(select(User).where(User.email == "platform@example.com"))).scalar_one()
+        user.platform_role = "platform_admin"
+        await session.commit()
+
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "platform@example.com", "password": "password123"},
+    )
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
+async def legacy_admin_headers(client):
+    """Registers an account carrying only the deprecated global admin role."""
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": "legacy-admin@example.com", "password": "password123", "display_name": "Legacy Admin"},
+    )
+
+    async with db_session.async_session_maker() as session:
+        user = (await session.execute(select(User).where(User.email == "legacy-admin@example.com"))).scalar_one()
+        user.role = "admin"
+        await session.commit()
+
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "legacy-admin@example.com", "password": "password123"},
+    )
+    token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest_asyncio.fixture
 async def other_auth_headers(client):
     """Registers a second test user and returns an Authorization header for it."""
-    resp = await client.post(
+    await client.post(
         "/api/v1/auth/register",
         json={"email": "bob@example.com", "password": "password123", "display_name": "Bob"},
+    )
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "bob@example.com", "password": "password123"},
     )
     token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}

@@ -13,6 +13,7 @@ from src.db import session as db_session
 from src.db.models import AssistantThread, Memory, MemoryEpisode
 from src.services import guardrail_service, memory_service, usage_service
 from src.services.llm import get_llm
+from src.services.workspace_service import resolve_workspace_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def _json_object(text: str) -> dict:
     start, end = cleaned.find("{"), cleaned.rfind("}")
     if start < 0 or end <= start:
         raise ValueError("Consolidation model did not return a JSON object")
-    value = json.loads(cleaned[start : end + 1])
+    value = json.loads(cleaned[start:end + 1])
     if not isinstance(value, dict):
         raise ValueError("Consolidation result must be an object")
     return value
@@ -65,14 +66,13 @@ async def _consolidate_thread(thread: AssistantThread) -> bool:
     if len(messages) - thread.compacted_message_count < settings.memory_compaction_message_threshold:
         return False
 
-    chunk = messages[thread.compacted_message_count : compact_until]
+    chunk = messages[thread.compacted_message_count:compact_until]
     lines = [f"{('USER' if isinstance(m, HumanMessage) else 'ASSISTANT')}: {m.content}" for m in chunk]
     untrusted = guardrail_service.wrap_untrusted_text("\n".join(lines), label="untrusted_transcript")
     llm = get_llm()
     response = await llm.ainvoke([SystemMessage(content=_CONSOLIDATION_PROMPT + "\n" + untrusted)])
     await usage_service.log_usage(
-        provider=settings.llm_provider,
-        model=settings.model_name,
+        provider=settings.llm_provider, model=settings.model_name,
         usage_metadata=getattr(response, "usage_metadata", None),
     )
     payload = _json_object(str(response.content))
@@ -89,29 +89,26 @@ async def _consolidate_thread(thread: AssistantThread) -> bool:
         # two heartbeat workers could both read the same compacted offset and each write an episode.
         current = (
             await db.execute(
-                select(AssistantThread).where(AssistantThread.thread_id == thread.thread_id).with_for_update()
+                select(AssistantThread)
+                .where(AssistantThread.thread_id == thread.thread_id)
+                .with_for_update()
             )
         ).scalar_one_or_none()
         if not current or current.compacted_message_count != thread.compacted_message_count:
             return False  # another worker already consolidated this range
+        # Durable notes still need a workspace_id (memories.workspace_id is NOT NULL) even though
+        # this background job has no per-request workspace context - fall back to the owner's
+        # personal workspace, same default resolve_workspace_for_user uses everywhere else.
+        workspace = await resolve_workspace_for_user(db, current.owner_id, None)
         episode = MemoryEpisode(
-            owner_id=current.owner_id,
-            thread_id=current.thread_id,
-            summary=summary,
+            owner_id=current.owner_id, thread_id=current.thread_id, summary=summary,
             decisions=[str(x)[:500] for x in payload.get("decisions", []) if str(x).strip()][:20],
             open_loops=[str(x)[:500] for x in payload.get("open_loops", []) if str(x).strip()][:20],
-            source_ids=source_ids,
-            message_count=len(chunk),
-            sequence=current.compacted_message_count,
-            provenance={
-                "source": "assistant_thread",
-                "thread_id": current.thread_id,
-                "range": [current.compacted_message_count, compact_until],
-                "source_count": len(source_ids),
-            },
-            confidence=0.8,
-            embedding=vector,
-            embedding_model=embedding_model,
+            source_ids=source_ids, message_count=len(chunk), sequence=current.compacted_message_count,
+            provenance={"source": "assistant_thread", "thread_id": current.thread_id,
+                        "range": [current.compacted_message_count, compact_until],
+                        "source_count": len(source_ids)},
+            confidence=0.8, embedding=vector, embedding_model=embedding_model,
             started_at=timestamps[0] if timestamps else None,
             ended_at=timestamps[-1] if timestamps else now,
         )
@@ -122,10 +119,7 @@ async def _consolidate_thread(thread: AssistantThread) -> bool:
         for candidate in payload.get("durable_notes", [])[:10]:
             if not isinstance(candidate, dict):
                 continue
-            title, detail = (
-                str(candidate.get("title", ""))[:200].strip(),
-                str(candidate.get("detail", ""))[:4000].strip(),
-            )
+            title, detail = str(candidate.get("title", ""))[:200].strip(), str(candidate.get("detail", ""))[:4000].strip()
             memory_type = str(candidate.get("memory_type", "fact"))
             content = f"{title}\n{detail}"
             if not title or memory_type not in allowed_types or memory_service.is_forbidden_sensitive_memory(content):
@@ -136,8 +130,7 @@ async def _consolidate_thread(thread: AssistantThread) -> bool:
             duplicate = (
                 await db.execute(
                     select(Memory.id).where(
-                        Memory.owner_id == current.owner_id,
-                        Memory.content_hash == digest,
+                        Memory.owner_id == current.owner_id, Memory.content_hash == digest,
                         Memory.status.in_(["active", "pending_review"]),
                     )
                 )
@@ -145,20 +138,14 @@ async def _consolidate_thread(thread: AssistantThread) -> bool:
             if duplicate:
                 continue
             note = Memory(
-                owner_id=current.owner_id,
-                category="Work",
-                title=title,
-                detail=detail,
-                memory_type=memory_type,
-                status="pending_review",
-                source_type="episode",
-                source_id=episode.id,
-                source_thread_id=current.thread_id,
-                provenance={"episode_id": episode.id, "thread_id": current.thread_id, "extractor": settings.model_name},
+                owner_id=current.owner_id, workspace_id=workspace.id, category="Work", title=title, detail=detail,
+                memory_type=memory_type, status="pending_review", source_type="episode",
+                source_id=episode.id, source_thread_id=current.thread_id,
+                provenance={"episode_id": episode.id, "thread_id": current.thread_id,
+                            "extractor": settings.model_name},
                 confidence=max(0.0, min(float(candidate.get("confidence", 0.7)), 1.0)),
                 importance=max(0.0, min(float(candidate.get("importance", 0.5)), 1.0)),
-                user_confirmed=False,
-                content_hash=digest,
+                user_confirmed=False, content_hash=digest,
                 expires_at=now + timedelta(days=30),
             )
             note.embedding, note.embedding_model = await memory_service.embed_text(content)
@@ -177,28 +164,21 @@ async def _maintain_store() -> None:
     now = datetime.now(UTC)
     async with db_session.async_session_maker() as db:
         expired = (
-            (
-                await db.execute(
-                    select(Memory)
-                    .where(
-                        Memory.expires_at.is_not(None),
-                        Memory.expires_at <= now,
-                        Memory.status.in_(["active", "pending_review"]),
-                    )
-                    .limit(100)
-                )
+            await db.execute(
+                select(Memory).where(
+                    Memory.expires_at.is_not(None), Memory.expires_at <= now,
+                    Memory.status.in_(["active", "pending_review"]),
+                ).limit(100)
             )
-            .scalars()
-            .all()
-        )
+        ).scalars().all()
         for memory in expired:
             memory.status = "revoked"
 
         missing = (
-            (await db.execute(select(Memory).where(Memory.status == "active", Memory.embedding.is_(None)).limit(20)))
-            .scalars()
-            .all()
-        )
+            await db.execute(
+                select(Memory).where(Memory.status == "active", Memory.embedding.is_(None)).limit(20)
+            )
+        ).scalars().all()
         for memory in missing:
             memory.embedding, memory.embedding_model = await memory_service.embed_text(
                 f"{memory.category}: {memory.title}\n{memory.detail}"
@@ -214,10 +194,10 @@ async def heartbeat() -> None:
         await _maintain_store()
         async with db_session.async_session_maker() as db:
             threads = (
-                (await db.execute(select(AssistantThread).order_by(AssistantThread.updated_at.asc()).limit(10)))
-                .scalars()
-                .all()
-            )
+                await db.execute(
+                    select(AssistantThread).order_by(AssistantThread.updated_at.asc()).limit(10)
+                )
+            ).scalars().all()
         for thread in threads:
             try:
                 await _consolidate_thread(thread)

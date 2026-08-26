@@ -14,6 +14,11 @@ nhân hoặc dữ liệu production. Khi chạy, prompt tóm tắt thật của 
 OpenRouter `openai/gpt-5.6-luna`; RAGAS dùng cùng gateway và model để chấm. Kết quả được ghi vào
 `eval/results/ragas-latest.json` và `eval/results/ragas-latest.md`.
 
+`AnswerRelevancy` dùng profile evaluator cố định `vietnamese-summary-v1`. Profile chỉ bản địa hóa
+prompt sinh câu hỏi ngược cho đúng tiếng Việt và miền tóm tắt nhiều ý; dataset, embedding, công
+thức cosine và gate `0.70` không thay đổi. Các câu hỏi ngược cùng cờ `noncommittal` được lưu trong
+JSON để có thể kiểm toán điểm relevancy.
+
 ## Cài đặt và chạy
 
 ```powershell
@@ -30,3 +35,16 @@ model. Mặc định lần lượt là `openai/gpt-5.6-luna`, `openai/gpt-5.6-lu
 
 Nếu dataset đã chứa trường `response` lấy từ một lần chạy Orbit trước đó, dùng `--use-stored-responses`
 để chỉ chấm lại mà không gọi application LLM.
+
+Khi chỉ một số ca/metric fail, tái dùng report gần nhất và chạy đúng phần lỗi; runner sẽ merge điểm
+mới vào baseline, không chấm lại các ca/metric đã đạt:
+
+```powershell
+python scripts/eval_ragas.py `
+  --responses-from-report eval/results/ragas-latest.json `
+  --case-id summary-calendar-004 `
+  --metric answer_relevancy
+```
+
+Lặp lại `--case-id` hoặc `--metric` để chọn nhiều mục. Partial rerun bắt buộc report baseline phải
+có đủ mọi case của dataset nhằm tránh tạo artifact tổng hợp thiếu dữ liệu.

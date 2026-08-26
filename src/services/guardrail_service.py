@@ -54,12 +54,12 @@ _COMPACT_INJECTION_TERMS = (
 )
 
 # These are intentionally intent-shaped patterns, not single forbidden words.
-# A work reminder such as "nh\u1eafc t\u00f4i \u0111i kh\u00e1m" must not be blocked merely because
+# A work reminder such as "nhắc tôi đi khám" must not be blocked merely because
 # it mentions health; requests for diagnosis or dangerous instructions are.
 _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     (
         "criminal_activity",
-        "l\u1eadp k\u1ebf ho\u1ea1ch, h\u1ed7 tr\u1ee3 ho\u1eb7c t\u1ea1o \u0111i\u1ec1u ki\u1ec7n cho h\u00e0nh vi vi ph\u1ea1m ph\u00e1p lu\u1eadt",
+        "lập kế hoạch, hỗ trợ hoặc tạo điều kiện cho hành vi vi phạm pháp luật",
         (
             r"\b(an trom|trom cap|moc tui|cuop|cuop giat|dot nhap|be khoa|pha khoa)\b",
             r"\b(lua dao|gian lan|tong tien|bat coc|buon lau|buon nguoi|rua tien|hoi lo)\b",
@@ -83,7 +83,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "self_harm",
-        "t\u1ef1 g\u00e2y h\u1ea1i ho\u1eb7c t\u1ef1 s\u00e1t",
+        "tự gây hại hoặc tự sát",
         (
             r"\b(tu tu|tu sat|tu huy hoai|cat tay|self harm|suicide)\b",
             r"\b(cach chet|chet khong dau|ket lieu ban than)\b",
@@ -91,7 +91,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "sexual_content",
-        "n\u1ed9i dung t\u00ecnh d\u1ee5c ho\u1eb7c khi\u00eau d\u00e2m",
+        "nội dung tình dục hoặc khiêu dâm",
         (
             r"\b(khieu dam|porn|pornography|nude|anh nong|noi dung 18\+|tinh duc)\b",
             r"\b(sex|sexual).{0,30}\b(explicit|content|story|image|video)\b",
@@ -101,7 +101,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "violence_weapons",
-        "h\u01b0\u1edbng d\u1eabn b\u1ea1o l\u1ef1c, v\u0169 kh\u00ed ho\u1eb7c ch\u1ea5t n\u1ed5",
+        "hướng dẫn bạo lực, vũ khí hoặc chất nổ",
         (
             r"\b(cach|huong dan|che tao|lam|mua|su dung).{0,45}\b(bom|sung|vu khi|thuoc no)\b",
             r"\b(giet|sat hai|tan cong|danh|dam|chem|ban).{0,35}\b(nguoi|dong nghiep|nan nhan|muc tieu)\b",
@@ -113,7 +113,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "illegal_drugs",
-        "h\u01b0\u1edbng d\u1eabn li\u00ean quan \u0111\u1ebfn ma t\u00fay ho\u1eb7c ch\u1ea5t c\u1ea5m",
+        "hướng dẫn liên quan đến ma túy hoặc chất cấm",
         (
             r"\b(cach|huong dan|che|nau|mua|ban|su dung|van chuyen).{0,45}\b(ma tuy|meth|cocaine|fentanyl|heroin)\b",
             r"\b(make|cook|buy|sell|transport|smuggle).{0,35}\b(meth|cocaine|fentanyl|heroin|illegal drug)\b",
@@ -121,7 +121,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "cyber_abuse",
-        "x\u00e2m nh\u1eadp, \u0111\u00e1nh c\u1eafp d\u1eef li\u1ec7u ho\u1eb7c ph\u00e1 ho\u1ea1i h\u1ec7 th\u1ed1ng",
+        "xâm nhập, đánh cắp dữ liệu hoặc phá hoại hệ thống",
         (
             r"\b(hack|phishing|malware|ransomware|ddos|keylogger)\b",
             r"\b(danh cap|lay trom|be khoa|vuot qua|bypass).{0,40}\b(mat khau|otp|tai khoan|xac thuc|auth)\b",
@@ -132,7 +132,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "privacy_abuse",
-        "thu th\u1eadp ho\u1eb7c ti\u1ebft l\u1ed9 d\u1eef li\u1ec7u c\u00e1 nh\u00e2n nh\u1ea1y c\u1ea3m",
+        "thu thập hoặc tiết lộ dữ liệu cá nhân nhạy cảm",
         (
             r"\b(doxx|doxing|theo doi trai phep)\b",
             r"\b(ghi am len|quay len|camera an|nghe len|doc trom tin nhan)\b",
@@ -142,7 +142,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "harassment_abuse",
-        "\u0111e d\u1ecda, qu\u1ea5y r\u1ed1i, c\u01b0\u1ee1ng \u00e9p ho\u1eb7c ng\u01b0\u1ee3c \u0111\u00e3i ng\u01b0\u1eddi kh\u00e1c",
+        "đe dọa, quấy rối, cưỡng ép hoặc ngược đãi người khác",
         (
             r"\b(quay roi|bat nat|de doa|tong tien|cuong ep|ep buoc|tra tan|khung bo tinh than)\b",
             r"\b(harass|bully|threaten|blackmail|coerce|torture|intimidate)\w*\b",
@@ -151,7 +151,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "intellectual_property_abuse",
-        "x\u00e2m ph\u1ea1m b\u1ea3n quy\u1ec1n ho\u1eb7c v\u01b0\u1ee3t c\u01a1 ch\u1ebf c\u1ea5p ph\u00e9p",
+        "xâm phạm bản quyền hoặc vượt cơ chế cấp phép",
         (
             r"\b(phan mem crack|crack ban quyen|key crack|tai lau|vi pham ban quyen|pha drm)\b",
             r"\b(keygen|pirated (?:software|movie|book)|software crack|crack(?:ing)? (?:a )?license|bypass drm|copyright piracy)\b",
@@ -159,7 +159,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "deception_abuse",
-        "l\u1eeba d\u1ed1i, gi\u1ea3 danh, b\u00f4i nh\u1ecd ho\u1eb7c ph\u00e1t t\u00e1n th\u00f4ng tin sai l\u1ec7ch c\u00f3 ch\u1ee7 \u0111\u00edch",
+        "lừa dối, giả danh, bôi nhọ hoặc phát tán thông tin sai lệch có chủ đích",
         (
             r"\b(gia danh|mao danh|boi nho|vu khong|phat tan tin gia|tao bang chung gia)\b",
             r"\b(impersonate|defame|fabricate evidence|spread (?:fake news|disinformation))\b",
@@ -168,7 +168,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "regulated_advice",
-        "t\u01b0 v\u1ea5n chuy\u00ean m\u00f4n y t\u1ebf, ph\u00e1p l\u00fd ho\u1eb7c t\u00e0i ch\u00ednh c\u00f3 r\u1ee7i ro cao",
+        "tư vấn chuyên môn y tế, pháp lý hoặc tài chính có rủi ro cao",
         (
             r"\b(chan doan|ke don|lieu dung).{0,45}\b(benh|thuoc|dieu tri)\b",
             r"\b(tu van phap ly|lach luat|tron thue|che giau tai san)\b",
@@ -177,7 +177,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "political_persuasion",
-        "v\u1eadn \u0111\u1ed9ng ho\u1eb7c thao t\u00fang quan \u0111i\u1ec3m ch\u00ednh tr\u1ecb",
+        "vận động hoặc thao túng quan điểm chính trị",
         (
             r"\b(thuyet phuc|van dong|tuyen truyen).{0,45}\b(bau cho|ung vien|dang phai|chinh tri)\b",
             r"\b(persuade|target|campaign).{0,45}\b(voter|candidate|political party)\b",
@@ -185,7 +185,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "hate_extremism",
-        "th\u00f9 gh\u00e9t, c\u1ef1c \u0111oan ho\u1eb7c kh\u1ee7ng b\u1ed1",
+        "thù ghét, cực đoan hoặc khủng bố",
         (
             r"\b(khung bo|cuc doan|diet chung|thuong dang chung toc)\b",
             r"\b(terroris|genocide|racial supremac|ethnic cleansing)\w*\b",
@@ -194,7 +194,7 @@ _SENSITIVE_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 )
 
 # Compact matching catches basic separator/zero-width obfuscation such as
-# "\u0103.n t.r.\u1ed9.m", "p h i  t a n g" and "ignore_previous_instructions".
+# "ă.n t.r.ộ.m", "p h i  t a n g" and "ignore_previous_instructions".
 _COMPACT_SENSITIVE_TERMS: dict[str, tuple[str, ...]] = {
     "criminal_activity": (
         "antrom",
@@ -230,9 +230,16 @@ _WORK_DOMAIN_PATTERNS = (
     r"\b(emails?|bao cao|reports?|tai lieu|documents?|bien ban|agendas?|presentations?)\b",
     r"\b(hoi thoai|conversation|tin nhan|message|chat|tom tat|summar|trich xuat|extract|tim kiem|search)\w*\b",
     r"\b(nang suat|productivity|work profiles?|ho so cong viec)\b",
+    # Reading the authenticated user's own saved work preferences is an agent-domain action even
+    # when the question does not literally say "memory" (for example, "mau sac yeu thich cua
+    # toi la gi?"). The memory tool remains owner-scoped, so this does not grant access to anyone
+    # else's profile.
+    r"\b(so thich|preferences?|mau sac yeu thich)\b.{0,80}\b(cua toi|my|mine)\b",
+    r"\b(ca lam|ca toi|work shifts?|backend|frontend|migrations?|api contracts?)\b",
+    r"\b(qa|kiem thu|smoke tests?|regressions?|loi|bugs?|defects?)\b",
     r"\b(pham vi|policy|guardrail|quy tac an toan)\b",
     # Engineering/work identifiers are often supplied as terse facts before a follow-up. Requiring
-    # the word "project" in "M\u00e3 th\u1eed nghi\u1ec7m l\u00e0 BLUE-42" caused a false out-of-domain refusal and
+    # the word "project" in "Mã thử nghiệm là BLUE-42" caused a false out-of-domain refusal and
     # broke working-memory tests even though test/release identifiers are normal work context.
     r"\b(ma (?:thu nghiem|du an|ticket|task|release|build)|test (?:code|id|identifier)|"
     r"ticket|sprints?|releases?|builds?|branches?|repositories?|repos?|staging|production)\b",
@@ -274,7 +281,7 @@ _SECRET_OUTPUT_PATTERNS = (
 def _normalize(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text or "")
     without_marks = "".join(char for char in normalized if not unicodedata.combining(char))
-    without_marks = without_marks.replace("\u0111", "d").replace("\u0110", "D")
+    without_marks = without_marks.replace("đ", "d").replace("Đ", "D")
     without_marks = re.sub(r"[\u200b-\u200f\u202a-\u202e\u2060\ufeff]", "", without_marks)
     return without_marks.casefold().strip()
 
@@ -282,7 +289,9 @@ def _normalize(text: str) -> str:
 def _normalized_variants(text: str) -> tuple[str, ...]:
     normalized = _normalize(text)
     canonical = re.sub(r"[^a-z0-9]+", " ", normalized).strip()
-    leetspeak = normalized.translate(str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t"}))
+    leetspeak = normalized.translate(
+        str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t"})
+    )
     leetspeak = re.sub(r"[^a-z0-9]+", " ", leetspeak).strip()
     collapsed = re.sub(r"(.)\1{2,}", r"\1\1", leetspeak)
     return tuple(dict.fromkeys((normalized, canonical, leetspeak, collapsed)))
@@ -318,19 +327,21 @@ def _refusal(category: str, reason: str) -> GuardrailDecision:
         category=category,
         reason=reason,
         response=(
-            f"Orbit t\u1eeb ch\u1ed1i y\u00eau c\u1ea7u n\u00e0y v\u00ec n\u1ed9i dung li\u00ean quan \u0111\u1ebfn {reason}. "
-            "Y\u00eau c\u1ea7u n\u1eb1m ngo\u00e0i ph\u1ea1m vi h\u1ed7 tr\u1ee3 an to\u00e0n c\u1ee7a h\u1ec7 th\u1ed1ng. Orbit ch\u1ec9 h\u1ed7 tr\u1ee3 c\u00f4ng vi\u1ec7c, "
-            "l\u1ecbch, nhi\u1ec7m v\u1ee5, nh\u1eafc nh\u1edf, ghi nh\u1edb v\u00e0 x\u1eed l\u00fd h\u1ed9i tho\u1ea1i ph\u1ee5c v\u1ee5 c\u00f4ng vi\u1ec7c."
+            f"Orbit từ chối yêu cầu này vì nội dung liên quan đến {reason}. "
+            "Yêu cầu nằm ngoài phạm vi hỗ trợ an toàn của hệ thống. Orbit chỉ hỗ trợ công việc, "
+            "lịch, nhiệm vụ, nhắc nhở, ghi nhớ và xử lý hội thoại phục vụ công việc."
         ),
     )
 
 
 def evaluate_request(text: str, *, conversation_mode: bool = False) -> GuardrailDecision:
     """Classify one user request before any LLM or tool is called."""
-    if _matches_any(text, _INJECTION_PATTERNS) or _contains_compact_term(text, _COMPACT_INJECTION_TERMS):
+    if _matches_any(text, _INJECTION_PATTERNS) or _contains_compact_term(
+        text, _COMPACT_INJECTION_TERMS
+    ):
         return _refusal(
             "prompt_injection",
-            "d\u1ea5u hi\u1ec7u c\u1ed1 ghi \u0111\u00e8 ch\u1ec9 d\u1eabn, v\u01b0\u1ee3t guardrail ho\u1eb7c y\u00eau c\u1ea7u ti\u1ebft l\u1ed9 prompt h\u1ec7 th\u1ed1ng",
+            "dấu hiệu cố ghi đè chỉ dẫn, vượt guardrail hoặc yêu cầu tiết lộ prompt hệ thống",
         )
 
     sensitive = _sensitive_decision(text)
@@ -338,18 +349,16 @@ def evaluate_request(text: str, *, conversation_mode: bool = False) -> Guardrail
         return sensitive
 
     if _matches_any(text, _WORK_DOMAIN_PATTERNS):
-        return GuardrailDecision(
-            True, "work", "Y\u00eau c\u1ea7u thu\u1ed9c domain c\u00f4ng vi\u1ec7c c\u1ee7a Orbit.", ""
-        )
+        return GuardrailDecision(True, "work", "Yêu cầu thuộc domain công việc của Orbit.", "")
     if _matches_any(text, _SMALL_TALK_PATTERNS):
-        return GuardrailDecision(True, "small_talk", "T\u01b0\u01a1ng t\u00e1c x\u00e3 giao an to\u00e0n.", "")
+        return GuardrailDecision(True, "small_talk", "Tương tác xã giao an toàn.", "")
 
     # ``conversation_mode`` is passed onward to the semantic classifier by guardrail_node. Access
     # to a conversation is permission to analyse that chat, not blanket permission for unrelated
     # questions, so it must no longer auto-allow everything here.
     return _refusal(
         "out_of_domain",
-        "ch\u1ee7 \u0111\u1ec1 ngo\u00e0i domain c\u00f4ng vi\u1ec7c v\u00e0 x\u1eed l\u00fd h\u1ed9i tho\u1ea1i c\u1ee7a Orbit",
+        "chủ đề ngoài domain công việc và xử lý hội thoại của Orbit",
     )
 
 
@@ -365,7 +374,7 @@ def evaluate_request_with_history(
     Hard policy checks always run on the new message first. History is consulted only when the
     new message was rejected solely as out-of-domain, the preceding user request was a valid work
     request, and the new text looks like a short answer to a time/choice clarification. This keeps
-    "7 ng\u00e0y tr\u01b0\u1edbc" working without allowing an unrelated question to inherit permission from an
+    "7 ngày trước" working without allowing an unrelated question to inherit permission from an
     earlier work turn.
     """
     decision = evaluate_request(text, conversation_mode=conversation_mode)
@@ -386,7 +395,7 @@ def evaluate_request_with_history(
     return GuardrailDecision(
         True,
         "work_follow_up",
-        "C\u00e2u tr\u1ea3 l\u1eddi ti\u1ebfp n\u1ed1i m\u1ed9t y\u00eau c\u1ea7u c\u00f4ng vi\u1ec7c h\u1ee3p l\u1ec7 trong c\u00f9ng thread.",
+        "Câu trả lời tiếp nối một yêu cầu công việc hợp lệ trong cùng thread.",
         "",
     )
 
@@ -401,9 +410,7 @@ def evaluate_context(text: str) -> GuardrailDecision:
     sensitive = _sensitive_decision(text)
     if sensitive is not None:
         return sensitive
-    return GuardrailDecision(
-        True, "conversation_data", "D\u1eef li\u1ec7u h\u1ed9i tho\u1ea1i \u0111\u01b0\u1ee3c ph\u00e9p.", ""
-    )
+    return GuardrailDecision(True, "conversation_data", "Dữ liệu hội thoại được phép.", "")
 
 
 def evaluate_action_content(text: str) -> GuardrailDecision:
@@ -413,23 +420,23 @@ def evaluate_action_content(text: str) -> GuardrailDecision:
     "Dentist" may be valid even though it contains no work keyword. Injection and sensitive or
     illegal objectives still fail closed, including edits made during confirmation.
     """
-    if _matches_any(text, _INJECTION_PATTERNS) or _contains_compact_term(text, _COMPACT_INJECTION_TERMS):
+    if _matches_any(text, _INJECTION_PATTERNS) or _contains_compact_term(
+        text, _COMPACT_INJECTION_TERMS
+    ):
         return _refusal(
             "prompt_injection",
-            "d\u1ea5u hi\u1ec7u c\u1ed1 ghi \u0111\u00e8 ch\u1ec9 d\u1eabn ho\u1eb7c l\u1ee3i d\u1ee5ng n\u1ed9i dung c\u1ee7a c\u00f4ng c\u1ee5 \u0111\u1ec3 \u0111i\u1ec1u khi\u1ec3n h\u1ec7 th\u1ed1ng",
+            "dấu hiệu cố ghi đè chỉ dẫn hoặc lợi dụng nội dung của công cụ để điều khiển hệ thống",
         )
     sensitive = _sensitive_decision(text)
     if sensitive is not None:
         return sensitive
-    return GuardrailDecision(True, "safe_action", "N\u1ed9i dung h\u00e0nh \u0111\u1ed9ng \u0111\u1ea1t guardrail.", "")
+    return GuardrailDecision(True, "safe_action", "Nội dung hành động đạt guardrail.", "")
 
 
 def evaluate_output(text: str) -> GuardrailDecision:
     """Fail closed if generated output leaks secrets/prompts or unsafe instructions."""
     if _matches_any(text, _SECRET_OUTPUT_PATTERNS):
-        return _refusal(
-            "secret_leakage", "th\u00f4ng tin x\u00e1c th\u1ef1c ho\u1eb7c b\u00ed m\u1eadt h\u1ec7 th\u1ed1ng"
-        )
+        return _refusal("secret_leakage", "thông tin xác thực hoặc bí mật hệ thống")
     if _matches_any(
         text,
         (
@@ -440,11 +447,11 @@ def evaluate_output(text: str) -> GuardrailDecision:
             r"\bnon-negotiable safety and domain policy\b",
         ),
     ):
-        return _refusal("prompt_leakage", "n\u1ed9i dung prompt ho\u1eb7c ch\u1ec9 d\u1eabn n\u1ed9i b\u1ed9")
+        return _refusal("prompt_leakage", "nội dung prompt hoặc chỉ dẫn nội bộ")
     sensitive = _sensitive_decision(text)
     if sensitive is not None:
         return sensitive
-    return GuardrailDecision(True, "safe_output", "Ph\u1ea3n h\u1ed3i \u0111\u1ea1t guardrail.", "")
+    return GuardrailDecision(True, "safe_output", "Phản hồi đạt guardrail.", "")
 
 
 def sanitize_untrusted_text(text: str) -> str:
@@ -452,15 +459,15 @@ def sanitize_untrusted_text(text: str) -> str:
     safe_lines: list[str] = []
     truncated = (text or "")[:MAX_UNTRUSTED_TEXT_CHARS]
     for line in truncated.splitlines():
-        if _matches_any(line, _INJECTION_PATTERNS) or _contains_compact_term(line, _COMPACT_INJECTION_TERMS):
-            safe_lines.append("[\u0110\u00e3 \u1ea9n m\u1ed9t d\u00f2ng c\u00f3 d\u1ea5u hi\u1ec7u prompt injection]")
+        if _matches_any(line, _INJECTION_PATTERNS) or _contains_compact_term(
+            line, _COMPACT_INJECTION_TERMS
+        ):
+            safe_lines.append("[Đã ẩn một dòng có dấu hiệu prompt injection]")
             continue
         escaped = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         safe_lines.append(escaped)
     if len(text or "") > MAX_UNTRUSTED_TEXT_CHARS:
-        safe_lines.append(
-            "[D\u1eef li\u1ec7u \u0111\u00e3 \u0111\u01b0\u1ee3c c\u1eaft b\u1edbt v\u00ec v\u01b0\u1ee3t gi\u1edbi h\u1ea1n an to\u00e0n]"
-        )
+        safe_lines.append("[Dữ liệu đã được cắt bớt vì vượt giới hạn an toàn]")
     return "\n".join(safe_lines)
 
 

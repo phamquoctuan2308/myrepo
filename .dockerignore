@@ -1,40 +1,18 @@
 .git
 .gitignore
+.ai-log
 .env
-.env.*
 .venv
-venv/
+Frontend
 __pycache__
 *.pyc
-*.pyo
 .pytest_cache
 .ruff_cache
-
-# Frontend build riêng trên Vercel — KHÔNG được lọt vào image backend.
-# Frontend/node_modules ~76MB: không nằm trong git nên build trên Render không thấy, nhưng
-# `docker build .` ở máy local thì có -> phình image và chậm build vô ích.
-Frontend/
-node_modules/
-
-# Dữ liệu runtime & secret — không bao giờ bake vào image
-data/
-secrets/
-credentials.json
-token.json
-*.db
-*.log
-logs/
-.ai-log/
-
-# Tài liệu & phụ trợ
 docs/
 presentation/
 eval/
-tests/
 *.md
-
-# Docker/CI metadata
+!requirements.txt
 .dockerignore
 Dockerfile
 docker-compose.yml
-.github/

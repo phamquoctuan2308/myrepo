@@ -14,7 +14,10 @@ bash scripts/_pyrun.sh scripts/submit_log.py || true
 exit 0
 '@
 
-[System.IO.File]::WriteAllText($HookFile, $HookBody, [System.Text.UTF8Encoding]::new($false))
+$HookPath = Join-Path (Get-Location) $HookFile
+$Utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+$NormalizedHookBody = ($HookBody -replace "`r`n", "`n") + "`n"
+[System.IO.File]::WriteAllText($HookPath, $NormalizedHookBody, $Utf8WithoutBom)
 Write-Host "[ai-log] Git pre-push hook installed."
 
 if (-not (Test-Path .ai-log)) { New-Item -ItemType Directory -Path .ai-log | Out-Null }

@@ -1,0 +1,32 @@
+/* Tailwind v4, scoped to Frontend/user only (Frontend/admin has its own vite.config.js and never
+   imports this file - the two apps are fully independent Vite builds sharing no CSS pipeline).
+
+   Preflight (Tailwind's CSS reset) is intentionally skipped: Bootstrap 5 is still the app's base
+   design system (buttons, forms, modals, the entire Frontend/shared/styles.css component library).
+   Tailwind here is purely an additive utility layer for the new glass/glow/spatial surfaces - it
+   must never re-reset headings, lists, form controls, etc. that Bootstrap and styles.css already
+   style. Only `theme` (variables + utility generation) and `utilities` are imported. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* Small set of reusable design tokens for the sci-fi surfaces, expressed as Tailwind v4 theme
+   variables so plain utility classes (bg-orbit-panel, shadow-orbit-glow, ...) work instead of
+   repeating long arbitrary values everywhere. These intentionally mirror the --ofx-* custom
+   properties already defined in orbit-fx.css (same palette, two different consumption paths:
+   CSS custom properties for the existing scoped-CSS component overrides, Tailwind theme vars for
+   new components authored directly with utility classes). */
+@theme {
+  --color-orbit-bg: #0a0e1a;
+  --color-orbit-panel: #10162a;
+  --color-orbit-panel-2: #141b34;
+  --color-orbit-line: rgba(139, 124, 246, 0.18);
+  --color-orbit-glow-a: #526ff5;
+  --color-orbit-glow-b: #8b5cf6;
+  --color-orbit-neon: #2ee6a6;
+  --color-orbit-ink: #e7e9f7;
+  --color-orbit-muted: #9aa3c7;
+
+  --shadow-orbit-glow: 0 0 20px rgba(99, 102, 241, 0.15);
+  --shadow-orbit-glow-focus: 0 0 0 3px rgba(99, 102, 241, 0.16), 0 0 24px rgba(99, 102, 241, 0.28);
+  --shadow-orbit-panel: 0 20px 60px rgba(0, 0, 0, 0.5);
+}

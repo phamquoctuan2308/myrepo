@@ -2,13 +2,22 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from src.config import get_settings
 from src.db import session as db_session
-from src.db.models import Conversation, ConversationParticipant, Message, User
+from src.db.models import (
+    AIPermission,
+    Conversation,
+    ConversationParticipant,
+    Message,
+    User,
+    Workspace,
+    WorkspaceMembership,
+)
 from src.models.schemas import MessageScope
-from src.services import chat_service
+from src.services import chat_service, consent_service
 
 
 async def _get_user_id(email: str) -> str:
@@ -25,7 +34,21 @@ async def _seed_conversation(
     queries deterministically instead of racing the real clock."""
     last_read_ats = last_read_ats or {}
     async with db_session.async_session_maker() as db:
-        conversation = Conversation(type="direct", name=None, created_by=alice_id)
+        workspace = Workspace(type="organization", name="Search test workspace")
+        db.add(workspace)
+        await db.flush()
+        db.add_all(
+            [
+                WorkspaceMembership(workspace_id=workspace.id, user_id=alice_id, role="owner"),
+                WorkspaceMembership(workspace_id=workspace.id, user_id=bob_id, role="member"),
+            ]
+        )
+        conversation = Conversation(
+            workspace_id=workspace.id,
+            type="direct",
+            name=None,
+            created_by=alice_id,
+        )
         db.add(conversation)
         await db.flush()
         for uid in (alice_id, bob_id):
@@ -33,13 +56,40 @@ async def _seed_conversation(
                 ConversationParticipant(
                     conversation_id=conversation.id,
                     user_id=uid,
+                    principal_kind="workspace_user",
+                    resource_role="participant",
                     last_read_at=last_read_ats.get(uid, datetime.now(UTC)),
+                )
+            )
+            db.add(
+                AIPermission(
+                    conversation_id=conversation.id,
+                    user_id=uid,
+                    granted=True,
+                    contribution_allowed=True,
                 )
             )
         for sender_id, content, created_at in messages:
             db.add(Message(conversation_id=conversation.id, sender_id=sender_id, content=content, created_at=created_at))
         await db.commit()
         return conversation.id
+
+
+def _contents(text: str) -> list[str]:
+    return [line.split("]: ", 1)[1] for line in text.splitlines() if "]: " in line]
+
+
+def _local_midnight_utc(days_ago: int = 0) -> datetime:
+    timezone = ZoneInfo(get_settings().calendar_timezone)
+    local = datetime.now(timezone) - timedelta(days=days_ago)
+    return local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+
+
+def _local_week_start_utc() -> datetime:
+    timezone = ZoneInfo(get_settings().calendar_timezone)
+    now = datetime.now(timezone)
+    monday = now - timedelta(days=now.weekday())
+    return monday.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
 
 
 @pytest.mark.asyncio
@@ -51,16 +101,18 @@ async def test_latest_n_returns_last_n_in_chronological_order(client, auth_heade
     conv_id = await _seed_conversation(alice_id, bob_id, msgs)
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.get_scoped_messages(db, conv_id, alice_id, MessageScope(kind="latest_n", count=3))
+        view = await consent_service.build_authorized_message_view(
+            db, conv_id, 3, user_id=alice_id, scope=MessageScope(kind="latest_n", count=3)
+        )
 
-    assert [m.content for m in result] == ["msg7", "msg8", "msg9"]
+    assert _contents(view.text) == ["msg7", "msg8", "msg9"]
 
 
 @pytest.mark.asyncio
 async def test_today_excludes_earlier_days(client, auth_headers, other_auth_headers):
     alice_id = await _get_user_id("alice@example.com")
     bob_id = await _get_user_id("bob@example.com")
-    today_midnight = chat_service._local_midnight_utc()
+    today_midnight = _local_midnight_utc()
     msgs = [
         (alice_id, "today", today_midnight + timedelta(hours=1)),
         (alice_id, "yesterday", today_midnight - timedelta(hours=1)),
@@ -69,16 +121,18 @@ async def test_today_excludes_earlier_days(client, auth_headers, other_auth_head
     conv_id = await _seed_conversation(alice_id, bob_id, msgs)
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.get_scoped_messages(db, conv_id, alice_id, MessageScope(kind="today"))
+        view = await consent_service.build_authorized_message_view(
+            db, conv_id, 50, user_id=alice_id, scope=MessageScope(kind="today")
+        )
 
-    assert [m.content for m in result] == ["today"]
+    assert _contents(view.text) == ["today"]
 
 
 @pytest.mark.asyncio
 async def test_yesterday_only_includes_yesterday(client, auth_headers, other_auth_headers):
     alice_id = await _get_user_id("alice@example.com")
     bob_id = await _get_user_id("bob@example.com")
-    today_midnight = chat_service._local_midnight_utc()
+    today_midnight = _local_midnight_utc()
     msgs = [
         (alice_id, "today", today_midnight + timedelta(hours=1)),
         (alice_id, "yesterday", today_midnight - timedelta(hours=1)),
@@ -87,16 +141,18 @@ async def test_yesterday_only_includes_yesterday(client, auth_headers, other_aut
     conv_id = await _seed_conversation(alice_id, bob_id, msgs)
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.get_scoped_messages(db, conv_id, alice_id, MessageScope(kind="yesterday"))
+        view = await consent_service.build_authorized_message_view(
+            db, conv_id, 50, user_id=alice_id, scope=MessageScope(kind="yesterday")
+        )
 
-    assert [m.content for m in result] == ["yesterday"]
+    assert _contents(view.text) == ["yesterday"]
 
 
 @pytest.mark.asyncio
 async def test_this_week_excludes_last_week(client, auth_headers, other_auth_headers):
     alice_id = await _get_user_id("alice@example.com")
     bob_id = await _get_user_id("bob@example.com")
-    week_start = chat_service._local_week_start_utc()
+    week_start = _local_week_start_utc()
     msgs = [
         (alice_id, "this week", week_start + timedelta(hours=1)),
         (alice_id, "last week", week_start - timedelta(hours=1)),
@@ -104,9 +160,11 @@ async def test_this_week_excludes_last_week(client, auth_headers, other_auth_hea
     conv_id = await _seed_conversation(alice_id, bob_id, msgs)
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.get_scoped_messages(db, conv_id, alice_id, MessageScope(kind="this_week"))
+        view = await consent_service.build_authorized_message_view(
+            db, conv_id, 50, user_id=alice_id, scope=MessageScope(kind="this_week")
+        )
 
-    assert [m.content for m in result] == ["this week"]
+    assert _contents(view.text) == ["this week"]
 
 
 @pytest.mark.asyncio
@@ -122,15 +180,15 @@ async def test_rolling_hours_window(client, auth_headers, other_auth_headers):
     conv_id = await _seed_conversation(alice_id, bob_id, msgs)
 
     async with db_session.async_session_maker() as db:
-        one_hour = await chat_service.get_scoped_messages(
-            db, conv_id, alice_id, MessageScope(kind="rolling_hours", hours=1)
+        one_hour = await consent_service.build_authorized_message_view(
+            db, conv_id, 50, user_id=alice_id, scope=MessageScope(kind="rolling_hours", hours=1)
         )
-        five_hours = await chat_service.get_scoped_messages(
-            db, conv_id, alice_id, MessageScope(kind="rolling_hours", hours=5)
+        five_hours = await consent_service.build_authorized_message_view(
+            db, conv_id, 50, user_id=alice_id, scope=MessageScope(kind="rolling_hours", hours=5)
         )
 
-    assert [m.content for m in one_hour] == ["30 min ago"]
-    assert [m.content for m in five_hours] == ["4 hours ago", "2 hours ago", "30 min ago"]
+    assert _contents(one_hour.text) == ["30 min ago"]
+    assert _contents(five_hours.text) == ["4 hours ago", "2 hours ago", "30 min ago"]
 
 
 @pytest.mark.asyncio
@@ -138,7 +196,7 @@ async def test_custom_range_filters_by_since_and_until(client, auth_headers, oth
     alice_id = await _get_user_id("alice@example.com")
     bob_id = await _get_user_id("bob@example.com")
     tz = ZoneInfo(get_settings().calendar_timezone)
-    base = datetime(2026, 1, 10, 12, 0, tzinfo=tz)
+    base = datetime(2026, 1, 10, 12, 0, tzinfo=tz).astimezone(UTC)
     msgs = [
         (alice_id, "too early", base - timedelta(hours=2)),
         (alice_id, "in range", base),
@@ -150,9 +208,11 @@ async def test_custom_range_filters_by_since_and_until(client, auth_headers, oth
     # exercising _parse_scope_datetime's "assume calendar_timezone" branch.
     scope = MessageScope(kind="custom_range", since="2026-01-10T11:00:00", until="2026-01-10T13:00:00")
     async with db_session.async_session_maker() as db:
-        result = await chat_service.get_scoped_messages(db, conv_id, alice_id, scope)
+        view = await consent_service.build_authorized_message_view(
+            db, conv_id, 50, user_id=alice_id, scope=scope
+        )
 
-    assert [m.content for m in result] == ["in range"]
+    assert _contents(view.text) == ["in range"]
 
 
 @pytest.mark.asyncio
@@ -169,9 +229,11 @@ async def test_unread_excludes_own_messages_and_messages_before_last_read(client
     conv_id = await _seed_conversation(alice_id, bob_id, msgs, last_read_ats={alice_id: alice_last_read})
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.get_scoped_messages(db, conv_id, alice_id, MessageScope(kind="unread"))
+        view = await consent_service.build_authorized_message_view(
+            db, conv_id, 50, user_id=alice_id, scope=MessageScope(kind="unread")
+        )
 
-    assert [m.content for m in result] == ["after alice read"]
+    assert _contents(view.text) == ["after alice read"]
 
 
 @pytest.mark.asyncio
@@ -228,18 +290,24 @@ async def test_get_first_unread_message_id_none_when_everything_read(client, aut
 async def test_get_first_unread_message_id_none_for_non_participant(client, auth_headers, other_auth_headers):
     alice_id = await _get_user_id("alice@example.com")
     bob_id = await _get_user_id("bob@example.com")
-    carol = await client.post(
+    await client.post(
         "/api/v1/auth/register",
         json={"email": "carol-unread@example.com", "password": "password123", "display_name": "Carol"},
     )
-    carol_headers = {"Authorization": f"Bearer {carol.json()['access_token']}"}
+    carol_login = await client.post(
+        "/api/v1/auth/login", json={"email": "carol-unread@example.com", "password": "password123"}
+    )
+    carol_headers = {"Authorization": f"Bearer {carol_login.json()['access_token']}"}
     carol_id = (await client.get("/api/v1/auth/me", headers=carol_headers)).json()["id"]
     conv_id = await _seed_conversation(alice_id, bob_id, [(bob_id, "hi", datetime.now(UTC))])
 
+    # A non-participant isn't just "shown nothing" - assert_participant (called internally) now
+    # denies access outright, same as any other non-member trying to read this conversation.
     async with db_session.async_session_maker() as db:
-        result = await chat_service.get_first_unread_message_id(db, conv_id, carol_id)
+        with pytest.raises(HTTPException) as exc:
+            await chat_service.get_first_unread_message_id(db, conv_id, carol_id)
 
-    assert result is None
+    assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -249,14 +317,16 @@ async def test_today_is_not_capped_at_fifty(client, auth_headers, other_auth_hea
     data. Prove the backend query has no such cap."""
     alice_id = await _get_user_id("alice@example.com")
     bob_id = await _get_user_id("bob@example.com")
-    today_midnight = chat_service._local_midnight_utc()
+    today_midnight = _local_midnight_utc()
     msgs = [(alice_id, f"msg{i}", today_midnight + timedelta(minutes=i)) for i in range(60)]
     conv_id = await _seed_conversation(alice_id, bob_id, msgs)
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.get_scoped_messages(db, conv_id, alice_id, MessageScope(kind="today"))
+        view = await consent_service.build_authorized_message_view(
+            db, conv_id, 100, user_id=alice_id, scope=MessageScope(kind="today")
+        )
 
-    assert len(result) == 60
+    assert view.included_message_count == 60
 
 
 @pytest.mark.asyncio
@@ -267,9 +337,9 @@ async def test_search_messages_case_insensitive_substring_match(client, auth_hea
     conv_id = await _seed_conversation(alice_id, bob_id, [(alice_id, "the Deadline is Friday", now)])
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.search_messages(db, conv_id, "deadline")
+        result = await consent_service.search_authorized_messages(db, conv_id, "deadline")
 
-    assert [m.content for m in result] == ["the Deadline is Friday"]
+    assert _contents(result) == ["the Deadline is Friday"]
 
 
 @pytest.mark.asyncio
@@ -280,9 +350,9 @@ async def test_search_messages_no_match_returns_empty(client, auth_headers, othe
     conv_id = await _seed_conversation(alice_id, bob_id, [(alice_id, "hello there", now)])
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.search_messages(db, conv_id, "deadline")
+        result = await consent_service.search_authorized_messages(db, conv_id, "deadline")
 
-    assert result == []
+    assert result == ""
 
 
 @pytest.mark.asyncio
@@ -296,11 +366,12 @@ async def test_search_messages_orders_newest_first_then_chronological_and_respec
     conv_id = await _seed_conversation(alice_id, bob_id, msgs)
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.search_messages(db, conv_id, "deadline", limit=20)
+        result = await consent_service.search_authorized_messages(db, conv_id, "deadline", limit=20)
 
-    assert len(result) == 20
+    contents = _contents(result)
+    assert len(contents) == 20
     # The 20 most recent matches (msg10..msg29), in ascending chronological order.
-    assert [m.content for m in result] == [f"deadline msg{i}" for i in range(10, 30)]
+    assert contents == [f"deadline msg{i}" for i in range(10, 30)]
 
 
 @pytest.mark.asyncio
@@ -312,9 +383,9 @@ async def test_search_messages_scoped_to_conversation(client, auth_headers, othe
     other_conv_id = await _seed_conversation(alice_id, bob_id, [(alice_id, "unrelated chit chat", now)])
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.search_messages(db, other_conv_id, "deadline")
+        result = await consent_service.search_authorized_messages(db, other_conv_id, "deadline")
 
-    assert result == []
+    assert result == ""
 
 
 @pytest.mark.asyncio
@@ -325,9 +396,9 @@ async def test_search_messages_blank_query_returns_empty(client, auth_headers, o
     conv_id = await _seed_conversation(alice_id, bob_id, [(alice_id, "anything", now)])
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.search_messages(db, conv_id, "   ")
+        result = await consent_service.search_authorized_messages(db, conv_id, "   ")
 
-    assert result == []
+    assert result == ""
 
 
 @pytest.mark.asyncio
@@ -345,6 +416,6 @@ async def test_search_messages_escapes_percent_in_query(client, auth_headers, ot
     )
 
     async with db_session.async_session_maker() as db:
-        result = await chat_service.search_messages(db, conv_id, "10%")
+        result = await consent_service.search_authorized_messages(db, conv_id, "10%")
 
-    assert [m.content for m in result] == ["discount is 10% today"]
+    assert _contents(result) == ["discount is 10% today"]

@@ -1,15 +1,24 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main, develop]
+    branches: [deploy]
   pull_request:
-    branches: [main]
+    branches: [deploy]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  lint-and-test:
+  backend:
+    name: Backend
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -37,12 +46,57 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Lint with ruff
+      - name: Lint with Ruff
         run: ruff check src/ tests/
 
-      - name: Run tests
+      - name: Verify PostgreSQL migrations
+        run: alembic upgrade head
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/orbit_test
+
+      - name: Run backend tests
         run: pytest tests/ -v --tb=short
         env:
           APP_ENV: test
           OPENAI_API_KEY: test-key
-          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/orbit_test
+
+  frontend:
+    name: Build user and admin frontends
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: Frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: Frontend
+        run: npm ci
+
+      - name: Build user and admin frontends
+        working-directory: Frontend
+        run: npm run build
+
+  deploy-backend:
+    name: Deploy backend to Render
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger Render deploy
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+      - name: Wait for health check
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS "${{ vars.RENDER_URL }}/ready"; then exit 0; fi
+            sleep 10
+          done
+          exit 1

@@ -1,416 +1,177 @@
-# P-132 — Tổng quan hệ thống và tài liệu chức năng
+# Tổng quan hệ thống Orbit
 
-> ⚠️ **Đã lỗi thời — giữ làm ảnh chụp lịch sử, không phản ánh trạng thái hiện tại.** Tài liệu này là
-> kết quả một lần rà soát mã nguồn tại commit `b4ae636` (02/08/2026, rất sớm trong dự án — trước cả
-> khi bỏ SQLite, trước Postgres/`AsyncPostgresSaver`, trước khi Task/Calendar/Reminder/Memory/Profile
-> nối API thật). Từ đó tới nay gần như mọi mục "🎨 UI mẫu"/"🟡 Một phần" liệt kê dưới đây đã hoàn
-> thành thật — xem [CLAUDE.md](CLAUDE.md) mục "Trạng thái hiện tại" để biết chính xác cái gì đã chạy
-> thật, và [ARCHITECTURE.md](ARCHITECTURE.md) để có kiến trúc + sơ đồ Mermaid đúng với code hiện tại.
-> Nội dung bên dưới **không được cập nhật lại** — giữ nguyên làm bằng chứng lịch sử cho việc rà soát
-> đã từng thực hiện thế nào, không phải tài liệu tham khảo cho việc phát triển tiếp.
+> Cập nhật theo code tại repository ngày 15/08/2026. Khi tài liệu khác với code, code và migration
+> Alembic là nguồn sự thật.
 
-## 1. Giới thiệu
+## 1. Orbit là gì?
 
-**Orbit** là trợ lý AI cá nhân được nhúng trong một ứng dụng chat. Hệ thống hướng tới việc giúp người dùng:
+Orbit là ứng dụng cộng tác có trợ lý AI, gồm hai giao diện web độc lập và một backend dùng chung:
 
-- nhắn tin 1-1 và theo nhóm theo thời gian thực;
-- tóm tắt hội thoại bằng AI;
-- tạo và xem sự kiện Google Calendar;
-- tạo nhắc việc có bước xác nhận của người dùng;
-- quản trị người dùng và kiểm duyệt hội thoại.
+- **User app**: chat 1-1/nhóm, trợ lý cá nhân, task, lịch, nhắc việc, memory và hồ sơ.
+- **Admin app**: quản lý tài khoản, cấu hình model AI, theo dõi mức dùng và audit log.
+- **Backend**: REST API, WebSocket, LangGraph agent, scheduler và lớp truy cập PostgreSQL.
 
-Repository gồm hai ứng dụng chạy độc lập:
+Tên sản phẩm trên giao diện là **Orbit**; metadata của FastAPI hiện vẫn dùng tên **AI20K Agent**.
 
-- **Frontend:** React 18 + Vite trong `Frontend/`, mặc định chạy tại `http://localhost:5173`.
-- **Backend:** FastAPI + LangGraph trong `src/`, mặc định chạy tại `http://localhost:8000`.
-
-### Quy ước trạng thái
-
-| Trạng thái | Ý nghĩa |
-| --- | --- |
-| ✅ Hoạt động | Đã có luồng frontend, backend và dữ liệu thật cần thiết cho chức năng chính |
-| 🟡 Một phần | Đã có một phần xử lý thật nhưng còn thiếu tích hợp, lưu trữ hoặc giao diện |
-| 🎨 UI mẫu | Có giao diện nhưng dùng dữ liệu tĩnh/local state, chưa nối backend |
-
-## 2. Sơ đồ tổng quan hệ thống
+## 2. Bức tranh tổng thể
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#ffffff", "primaryColor": "#eef2ff", "primaryTextColor": "#111827", "primaryBorderColor": "#4f46e5", "secondaryColor": "#ecfdf5", "tertiaryColor": "#f8fafc", "lineColor": "#374151", "textColor": "#111827", "clusterBkg": "#f8fafc", "clusterBorder": "#94a3b8", "edgeLabelBackground": "#ffffff"}}}%%
-flowchart TB
-    User([Người dùng])
-    Admin([Quản trị viên])
-
-    subgraph FE["Frontend — React + Vite"]
-        Router["React Router<br/>ProtectedRoute / AdminRoute"]
-        AuthContext["AuthContext<br/>JWT và người dùng hiện tại"]
-        FeatureUI["Các trang chức năng<br/>Chat / Assistant / Tasks / Calendar / Reminder / Memory"]
-        AdminUI["Trang quản trị<br/>Dashboard / Users / Conversations"]
-        APIClient["REST API client"]
-        WSClient["WebSocket client<br/>tự kết nối lại"]
-    end
-
-    subgraph BE["Backend — FastAPI"]
-        App["FastAPI app<br/>/api/v1"]
-        AuthAPI["Auth API<br/>JWT + bcrypt"]
-        ChatAPI["Messaging API<br/>hội thoại và tin nhắn"]
-        AdminAPI["Admin API<br/>RBAC"]
-        AgentAPI["Agent API<br/>chat / resume"]
-        WSGateway["WebSocket gateway<br/>/api/v1/ws"]
-        ChatService["Chat service"]
-        WSManager["Connection manager"]
-
-        subgraph AI["LangGraph Agent"]
-            Planner["Planner<br/>LLM + tool calling"]
-            Tools["Tools<br/>Summary / Calendar / Reminder"]
-            Checkpoint["MemorySaver<br/>trạng thái thread trong RAM"]
-        end
-
-        Scheduler["APScheduler"]
-    end
-
-    subgraph DATA["Dữ liệu nội bộ"]
-        SQLite[("SQLite<br/>users / conversations / participants / messages")]
-        ReminderMemory[("Reminder store<br/>trong RAM")]
-    end
-
-    subgraph EXT["Dịch vụ bên ngoài"]
-        Groq["Groq API<br/>Llama 3.3 70B"]
-        GoogleCalendar["Google Calendar API"]
-    end
-
-    User --> Router
-    Admin --> Router
-    Router --> AuthContext
-    Router --> FeatureUI
-    Router --> AdminUI
-    FeatureUI --> APIClient
-    FeatureUI --> WSClient
-    AdminUI --> APIClient
-    APIClient -->|HTTPS / JSON| App
-    WSClient <-->|WebSocket + JWT| WSGateway
-
-    App --> AuthAPI
-    App --> ChatAPI
-    App --> AdminAPI
-    App --> AgentAPI
-    AuthAPI --> SQLite
-    ChatAPI --> ChatService --> SQLite
-    AdminAPI --> SQLite
-    WSGateway --> ChatService
-    WSGateway --> WSManager
-    ChatService --> WSManager
-
-    AgentAPI --> Planner
-    Planner --> Groq
-    Planner --> Tools
-    Tools --> Groq
-    Tools --> GoogleCalendar
-    Tools --> Scheduler
-    Scheduler --> ReminderMemory
-    Planner --- Checkpoint
-```
-
-## 3. Các khối kiến trúc
-
-### 3.1 Frontend
-
-Frontend là SPA dùng React Router. `ProtectedRoute` chặn các trang nghiệp vụ khi chưa đăng nhập; `AdminRoute` chặn trang quản trị nếu tài khoản không có role `admin`.
-
-Các khối chính:
-
-- `context/AuthContext.jsx`: giữ JWT và thông tin người dùng; token được lưu trong `localStorage`.
-- `api/`: client gọi REST API và tạo WebSocket.
-- `hooks/`: tải danh sách hội thoại và lịch sử tin nhắn.
-- `components/chat/`: danh sách hội thoại, vùng tin nhắn, tạo hội thoại và panel AI.
-- `pages/admin/`: dashboard, quản lý người dùng và kiểm duyệt hội thoại.
-- `pages/` còn lại: giao diện trợ lý, task, lịch, nhắc việc, memory và profile.
-
-### 3.2 Backend
-
-FastAPI cung cấp ba nhóm xử lý chính:
-
-1. **REST API:** xác thực, chat, quản trị và AI agent.
-2. **WebSocket:** nhận/gửi tin nhắn thời gian thực cho các thành viên hội thoại.
-3. **Lifespan services:** khởi tạo database và bật/tắt APScheduler cùng vòng đời ứng dụng.
-
-Business logic của chat được tách vào `src/services/chat_service.py`. SQLAlchemy async làm việc với SQLite qua session trong `src/db/session.py`.
-
-### 3.3 AI Agent
-
-Agent sử dụng LangGraph với vòng lặp đơn giản:
-
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#ffffff", "primaryColor": "#eef2ff", "primaryTextColor": "#111827", "primaryBorderColor": "#4f46e5", "secondaryColor": "#ecfdf5", "tertiaryColor": "#f8fafc", "lineColor": "#374151", "textColor": "#111827", "edgeLabelBackground": "#ffffff"}}}%%
 flowchart LR
-    Start((Bắt đầu)) --> Planner[Planner gọi LLM]
-    Planner --> Decision{LLM yêu cầu tool?}
-    Decision -->|Không| Answer[Trả lời người dùng]
-    Decision -->|Có| Tool[Thực thi tool]
-    Tool --> Confirm{Hành động cần xác nhận?}
-    Confirm -->|Không| Planner
-    Confirm -->|Có| Interrupt[Interrupt và trả bản nháp]
-    Interrupt --> Resume[Người dùng đồng ý / từ chối / chỉnh sửa]
-    Resume --> Tool
-    Answer --> End((Kết thúc))
+    U[User app<br/>React + Vite :5173]
+    A[Admin app<br/>React + Vite :5174]
+    API[FastAPI<br/>REST + WebSocket :8000]
+    AG[LangGraph agent]
+    SCH[APScheduler]
+    DB[(PostgreSQL)]
+    LLM[Gemini / Groq / OpenAI]
+    GC[Google Calendar API]
+
+    U -->|JWT + REST| API
+    A -->|JWT + REST| API
+    U <-->|WebSocket| API
+    API --> AG
+    API --> SCH
+    API --> DB
+    AG --> LLM
+    AG --> DB
+    AG --> GC
+    SCH --> DB
+    SCH --> GC
 ```
 
-Các tool đang được đăng ký:
+Backend được tổ chức như một **modular monolith**: API, agent và background jobs chạy trong cùng
+một process FastAPI. PostgreSQL là database bắt buộc cho development/production; SQLite chỉ được
+cho phép trong test.
 
-| Tool | Chức năng | Xác nhận | Lưu ý |
-| --- | --- | --- | --- |
-| `summarize_conversation` | Tóm tắt phần hội thoại được truyền vào theo kiểu ngắn, chi tiết hoặc bullet | Không | Gọi Groq lần thứ hai để tạo bản tóm tắt |
-| `create_calendar_event` | Tạo sự kiện Google Calendar từ bản nháp | Bắt buộc | Cần OAuth token Google hợp lệ |
-| `list_calendar_events` | Liệt kê sự kiện trong khoảng thời gian | Không | Đọc trực tiếp từ Google Calendar |
-| `create_reminder` | Lên lịch nhắc trước thời hạn | Bắt buộc | Chỉ lưu trong RAM và callback hiện mới ghi log |
-| `list_reminders` | Liệt kê reminder trong bộ nhớ hiện tại | Không | Dữ liệu mất khi backend restart |
+## 3. Chức năng đã có trong code
 
-LangGraph dùng `MemorySaver`, vì vậy state theo `thread_id` cũng chỉ tồn tại trong process hiện tại và mất khi backend restart.
+### User app
 
-### 3.4 Dữ liệu
+| Khu vực | Chức năng chính |
+| --- | --- |
+| `/assistant` | Chat trực tiếp với agent; xác nhận hoặc từ chối hành động có tác dụng phụ |
+| `/chat` | Chat 1-1/nhóm realtime, lịch sử tin nhắn, quyền cho AI đọc từng hội thoại |
+| `/tasks` | Tạo/quản lý task, nhận gợi ý do AI phát hiện hoặc trích xuất |
+| `/tasks/inbox` | Gom task cần quyết định, quá hạn, sắp đến hạn và ưu tiên cao |
+| `/calendar` | Kết nối Google Calendar riêng từng user; xem/tạo/sửa/xóa event |
+| `/reminders` | Tạo và hủy reminder; nhận thông báo realtime khi đến giờ |
+| `/memory` | CRUD ghi chú cá nhân mà user muốn Orbit lưu |
+| `/profile` | Cập nhật hồ sơ, preferences và mật khẩu |
 
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#ffffff", "primaryColor": "#eef2ff", "primaryTextColor": "#111827", "primaryBorderColor": "#4f46e5", "secondaryColor": "#ecfdf5", "tertiaryColor": "#f8fafc", "lineColor": "#374151", "textColor": "#111827"}}}%%
-erDiagram
-    USER ||--o{ CONVERSATION : creates
-    USER ||--o{ CONVERSATION_PARTICIPANT : joins
-    CONVERSATION ||--|{ CONVERSATION_PARTICIPANT : has
-    USER ||--o{ MESSAGE : sends
-    CONVERSATION ||--o{ MESSAGE : contains
+### Admin app
 
-    USER {
-        string id PK
-        string email UK
-        string password_hash
-        string display_name
-        string role
-        boolean is_active
-        datetime created_at
-    }
-    CONVERSATION {
-        string id PK
-        string type
-        string name
-        string created_by FK
-        datetime created_at
-        datetime updated_at
-    }
-    CONVERSATION_PARTICIPANT {
-        string conversation_id PK,FK
-        string user_id PK,FK
-        datetime joined_at
-        datetime last_read_at
-    }
-    MESSAGE {
-        string id PK
-        string conversation_id FK
-        string sender_id FK
-        text content
-        datetime created_at
-    }
+| Khu vực | Chức năng chính |
+| --- | --- |
+| `/users` | Tìm user, đổi `platform_role`, bật/tắt tài khoản |
+| `/ai-management` | Xem/đổi provider, model, temperature; xem consent và số liệu proactive |
+| `/ai-usage` | Báo cáo token/request theo ngày và model |
+| `/audit-log` | Tra cứu các hành động quản trị đã ghi nhận |
+
+Admin là vai trò vận hành nền tảng, **không có quyền mặc định đọc nội dung hội thoại**. Quyền đọc
+hội thoại chỉ đến từ participant đang hoạt động trong chính hội thoại đó.
+
+## 4. Các luồng quan trọng
+
+### Chat giữa người dùng
+
+1. User đăng nhập và nhận JWT.
+2. Frontend mở `/api/v1/ws?token=...` và dùng REST để tải dữ liệu ban đầu.
+3. Khi gửi tin nhắn, backend kiểm tra user là participant có tối thiểu role `participant`, lưu
+   `messages`, rồi broadcast `new_message` tới các participant đang kết nối.
+4. Một background task kiểm tra tin nhắn có dấu hiệu cam kết/hạn chót. Nó chỉ gọi LLM khi regex
+   pre-filter khớp, user đã cấp quyền AI và ngân sách ngày chưa hết.
+5. Nếu phát hiện cam kết, backend tạo task `suggested` cho người gửi và phát `task_suggested`.
+
+### Hỏi trợ lý AI
+
+1. Frontend gọi `POST /api/v1/chat` cùng câu hỏi, `thread_id` tùy chọn và context tùy chọn.
+2. Nếu gắn với hội thoại thật, backend kiểm tra cả membership và consent trong `ai_permissions`.
+3. LangGraph gọi planner, planner có thể trả lời hoặc gọi một trong 9 tool.
+4. Các thao tác tạo/sửa/xóa Calendar và tạo Reminder gọi `interrupt()` trước khi thay đổi dữ liệu.
+5. Frontend gửi quyết định qua `POST /api/v1/chat/resume`; graph tiếp tục từ PostgreSQL checkpoint.
+
+### Calendar và Reminder
+
+- Google login và Google Calendar là hai OAuth flow độc lập. Calendar dùng authorization-code flow,
+  refresh token được mã hóa Fernet trước khi lưu.
+- Calendar luôn là `primary` calendar của user đã kết nối; không có tài khoản Calendar dùng chung.
+- Scheduler poll incremental Calendar cho user vừa kết nối Calendar vừa online, mặc định mỗi 20 giây.
+- Reminder được lưu trong bảng ứng dụng và có APScheduler job lưu trong `apscheduler_jobs` để sống
+  qua restart. Khi đến giờ, backend đổi trạng thái và phát `reminder_fired` qua WebSocket.
+
+## 5. Dữ liệu chính
+
+| Nhóm | Bảng |
+| --- | --- |
+| Danh tính | `users`, `google_identities` |
+| Chat và consent | `conversations`, `conversation_participants`, `messages`, `ai_permissions` |
+| Dữ liệu cá nhân | `tasks`, `reminders`, `memories`, `google_calendar_credentials` |
+| Vận hành | `usage_logs`, `audit_logs`, `platform_settings` |
+| Hạ tầng thư viện | `apscheduler_jobs`, các bảng checkpoint do LangGraph tạo |
+
+Không có workspace trong mô hình hiện tại. Migration `20260813_08` đã loại bỏ workspace và các
+principal bên ngoài; participant của hội thoại phải là user đã đăng ký.
+
+## 6. Phân quyền và bảo mật
+
+- REST dùng Bearer JWT; mật khẩu được hash bằng bcrypt.
+- `platform_role` gồm `user` và `platform_admin`.
+- Quyền resource trong hội thoại gồm `viewer`, `participant`, `manager`; participant bị revoke
+  không còn quyền truy cập.
+- Consent cho AI có khóa `(conversation_id, user_id)` và độc lập giữa các participant.
+- Calendar token được mã hóa khi lưu; API key và secret lấy từ environment.
+- Production từ chối secret mặc định, wildcard CORS và provider không có API key.
+- Prompt của agent đánh dấu nội dung hội thoại/tool result là dữ liệu không tin cậy.
+- Chưa có rate limiting, security headers tập trung hoặc mã hóa đầu-cuối nội dung chat.
+
+## 7. Công nghệ và cấu trúc repository
+
+```text
+src/
+  agents/       LangGraph state, planner, graph và tools
+  api/          REST route theo domain
+  auth/         JWT, bcrypt, Google ID-token và dependencies
+  db/           SQLAlchemy models, session và Alembic migrations
+  models/       Pydantic request/response schemas
+  services/     Business logic và integration
+  websocket/    Connection manager và WebSocket endpoint
+Frontend/
+  user/         Entry point/build của User app
+  admin/        Entry point/build của Admin app
+  src/          Component, page, hook và API client dùng chung
+tests/          Backend tests
 ```
 
-Database mặc định là `sqlite:///./data/app.db`. Hiện chưa có bảng cho task, calendar, reminder, memory, quyền đọc hội thoại của AI hoặc thống kê chi phí LLM.
+Backend dùng Python 3.11+, FastAPI, SQLAlchemy async, LangGraph và APScheduler. Hai frontend dùng
+React 18, Vite 5, React Router và Bootstrap; User app dùng thêm FullCalendar.
 
-## 4. Tài liệu chức năng
+## 8. Chạy và triển khai
 
-### 4.1 Xác thực và phân quyền — ✅ Hoạt động
+Local cần PostgreSQL, backend cổng `8000`, User app `5173`, Admin app `5174`. Trên Windows phải chạy:
 
-- Đăng ký bằng email, tên hiển thị và mật khẩu.
-- Kiểm tra email trùng trước khi tạo tài khoản.
-- Hash mật khẩu bằng bcrypt; backend không lưu mật khẩu thô.
-- Đăng nhập và cấp JWT có thời hạn cấu hình được.
-- Khôi phục phiên bằng endpoint `/auth/me` khi tải lại trang.
-- Đăng xuất phía frontend bằng cách xóa JWT khỏi `localStorage`.
-- Hai role: `user` và `admin`.
-- Email khớp `INITIAL_ADMIN_EMAIL` được gán role admin khi đăng ký.
-- Backend dùng dependency riêng để bảo vệ API admin; frontend dùng `AdminRoute` để bảo vệ màn hình.
+```powershell
+python scripts/run_dev.py
+```
 
-### 4.2 Chat 1-1 và chat nhóm — ✅ Hoạt động
+Launcher này ép `SelectorEventLoop` để psycopg async/LangGraph checkpointer hoạt động đúng.
 
-- Tìm người dùng theo tên hoặc email.
-- Tạo hội thoại trực tiếp với đúng một người khác.
-- Nếu hội thoại trực tiếp đã tồn tại, service trả lại hội thoại đó thay vì tạo bản trùng.
-- Tạo nhóm với tên nhóm và nhiều thành viên.
-- Danh sách hội thoại được sắp xếp theo lần cập nhật gần nhất.
-- Tải lịch sử tin nhắn theo trang, tối đa 200 tin/lần và hỗ trợ con trỏ `before`.
-- Gửi tin nhắn qua WebSocket; REST endpoint gửi tin cũng tồn tại.
-- Backend kiểm tra người gửi có phải thành viên hội thoại hay không.
-- Broadcast tin nhắn mới tới các kết nối đang mở của thành viên.
-- Client tự kết nối lại WebSocket sau 2 giây khi mất kết nối.
-- Đánh dấu hội thoại đã đọc và hiển thị số tin chưa đọc.
+Repository có sẵn cấu hình cho Docker Compose, Render, Vercel và GitHub Actions. Tuy nhiên trạng thái
+đã deploy thật hay chưa không thể kết luận từ source code. Một điểm vận hành quan trọng: production
+không gọi `Base.metadata.create_all()`, trong khi Docker/CD hiện chưa tự chạy `alembic upgrade head`.
+Vì vậy database production phải được migrate riêng trước khi app khởi động; đây là khoảng trống cần
+khắc phục trong pipeline.
 
-### 4.3 AI tóm tắt hội thoại trong Chat — ✅ Hoạt động
+## 9. Giới hạn cần biết
 
-- Người dùng mở panel AI từ một hội thoại đang chọn.
-- Có thể gửi 20 hoặc 50 tin gần nhất làm context cho agent.
-- Panel gọi `/api/v1/chat`, LangGraph chọn tool tóm tắt và Groq tạo kết quả.
-- Kết quả được hiển thị lại trong panel.
-- Prompt hiện yêu cầu chỉ trả đúng một bản tóm tắt, không lặp lại dưới nhiều định dạng.
+- WebSocket connection registry và ownership map của agent thread nằm trong memory của process.
+  Hệ thống hiện phù hợp một backend instance/worker, chưa hỗ trợ scale ngang an toàn.
+- APScheduler chạy cùng web process; instance ngủ hoặc nhiều replica sẽ ảnh hưởng độ đúng giờ và có
+  thể tạo job trùng.
+- `thread_id` do client có thể gửi và owner chỉ được nhớ trong process; restart/multi-worker làm mất
+  ràng buộc này. Cần lưu owner bền vững và kiểm tra ở mọi chat/resume trước khi coi là production-safe.
+- Calendar dùng polling thay vì Google push notification nên có độ trễ và tiêu tốn quota theo số
+  user online.
+- `chroma_persist_dir` chỉ là cấu hình chưa sử dụng; tìm kiếm tin nhắn hiện là PostgreSQL `ILIKE`,
+  không phải semantic/vector search.
 
-Giới hạn hiện tại:
-
-- Scope “Unread messages”, “Today's messages” và “Custom time range” chưa được ánh xạ thành bộ lọc riêng; hiện chúng dẫn tới dùng toàn bộ mảng tin đã tải.
-- Các nút “Extract tasks”, “Find schedule” và “Deadlines” chưa gắn handler.
-- Ô “Ask Orbit” trong panel chưa gửi yêu cầu.
-- Toggle cấp quyền AI chỉ là state cục bộ trên frontend, chưa được lưu hoặc kiểm tra ở backend.
-
-### 4.4 Google Calendar qua Agent — 🟡 Một phần
-
-Backend đã có tool để:
-
-- liệt kê sự kiện trong một khoảng thời gian;
-- tạo bản nháp sự kiện;
-- tạm dừng graph để chờ người dùng đồng ý, từ chối hoặc chỉnh sửa;
-- tạo sự kiện thật qua Google Calendar API sau khi được đồng ý.
-
-Phần còn thiếu:
-
-- Trang `/calendar` vẫn đọc `mockData.js`, chưa gọi Google Calendar.
-- Frontend chưa có hàm gọi `/chat/resume`, nên chưa hoàn tất được bước xác nhận từ UI.
-- Cần chạy OAuth setup và có `credentials.json`/`token.json` hợp lệ trên backend.
-
-### 4.5 Reminder — 🟡 Một phần
-
-Backend có thể tạo bản nháp reminder, chờ xác nhận và đưa job vào APScheduler. Tuy nhiên:
-
-- reminder chỉ nằm trong dictionary trong RAM;
-- job mất khi backend restart;
-- callback khi đến giờ mới đổi trạng thái và ghi log, chưa đẩy thông báo tới frontend;
-- trang `/reminders` dùng dữ liệu seed và chỉ bật/tắt bằng local state;
-- frontend chưa nối luồng xác nhận `/chat/resume`.
-
-### 4.6 Quản trị — ✅ Hoạt động
-
-Chỉ tài khoản `admin` được phép:
-
-- xem tổng số người dùng, hội thoại, tin nhắn và số người dùng mới trong 7 ngày;
-- tìm kiếm người dùng;
-- đổi role `user`/`admin` của tài khoản khác;
-- khóa hoặc mở khóa tài khoản khác;
-- xem danh sách hội thoại và số thành viên/tin nhắn;
-- xem toàn bộ tin nhắn của một hội thoại;
-- xóa hội thoại và các participant/message liên quan.
-
-Admin không thể tự đổi role hoặc tự khóa chính mình qua các API tương ứng.
-
-### 4.7 Các màn hình đang là UI mẫu — 🎨 UI mẫu
-
-| Màn hình | Nội dung hiện tại | Chưa có |
-| --- | --- | --- |
-| `/assistant` | Prompt gợi ý, danh sách session và phản hồi mẫu | Chưa gọi agent/backend thật |
-| `/tasks` | Bảng task và gợi ý ưu tiên từ `mockData.js` | Chưa có model, API hoặc lưu trữ task |
-| `/calendar` | FullCalendar với sự kiện mẫu | Chưa nối Google Calendar/tool agent |
-| `/reminders` | Danh sách seed, bật/tắt cục bộ | Chưa nối APScheduler và thông báo realtime |
-| `/memory` | Danh sách memory tĩnh và tìm kiếm phía client | Chưa có vector store/database/API |
-| `/profile` | Form và nút lưu mô phỏng | Chưa cập nhật hồ sơ hoặc cài đặt ở backend |
-
-## 5. Danh sách API hiện tại
-
-Tất cả endpoint nghiệp vụ nằm dưới prefix `/api/v1`, ngoại trừ `/health`.
-
-| Method | Endpoint | Chức năng | Quyền hiện tại |
-| --- | --- | --- | --- |
-| `GET` | `/health` | Kiểm tra backend | Public |
-| `POST` | `/api/v1/auth/register` | Đăng ký và nhận JWT | Public |
-| `POST` | `/api/v1/auth/login` | Đăng nhập và nhận JWT | Public |
-| `GET` | `/api/v1/auth/me` | Lấy người dùng hiện tại | JWT |
-| `GET` | `/api/v1/users` | Tìm người dùng khác | JWT |
-| `GET` | `/api/v1/conversations` | Danh sách hội thoại | JWT |
-| `POST` | `/api/v1/conversations` | Tạo chat trực tiếp/nhóm | JWT |
-| `GET` | `/api/v1/conversations/{id}/messages` | Lịch sử tin nhắn | JWT + thành viên |
-| `POST` | `/api/v1/conversations/{id}/messages` | Gửi tin nhắn qua REST | JWT + thành viên |
-| `POST` | `/api/v1/conversations/{id}/read` | Đánh dấu đã đọc | JWT + thành viên |
-| `WS` | `/api/v1/ws?token=...` | Chat realtime | JWT query parameter |
-| `POST` | `/api/v1/chat` | Chạy AI agent | Public ở backend hiện tại |
-| `POST` | `/api/v1/chat/resume` | Tiếp tục sau bước xác nhận | Public ở backend hiện tại |
-| `GET` | `/api/v1/status` | Trạng thái agent | Public |
-| `GET` | `/api/v1/admin/stats` | Thống kê hệ thống | Admin |
-| `GET` | `/api/v1/admin/users` | Danh sách/tìm người dùng | Admin |
-| `PATCH` | `/api/v1/admin/users/{id}/role` | Đổi role | Admin |
-| `PATCH` | `/api/v1/admin/users/{id}/status` | Khóa/mở khóa | Admin |
-| `GET` | `/api/v1/admin/conversations` | Danh sách hội thoại | Admin |
-| `GET` | `/api/v1/admin/conversations/{id}/messages` | Xem tin nhắn | Admin |
-| `DELETE` | `/api/v1/admin/conversations/{id}` | Xóa hội thoại | Admin |
-
-## 6. Luồng dữ liệu chính
-
-### 6.1 Gửi tin nhắn realtime
-
-1. Frontend mở WebSocket bằng JWT.
-2. Backend giải mã JWT, kiểm tra user và đăng ký kết nối theo `user_id`.
-3. Client gửi `conversation_id` và `content`.
-4. Backend kiểm tra membership, ghi `Message` vào SQLite và cập nhật thời gian hội thoại.
-5. Connection manager broadcast payload `new_message` tới các thành viên.
-6. Frontend cập nhật vùng chat, đưa hội thoại lên đầu và tăng unread count khi cần.
-
-### 6.2 Tóm tắt hội thoại
-
-1. Người dùng chọn hội thoại và mở AI Panel.
-2. Frontend lấy tập tin nhắn theo scope rồi gọi `/api/v1/chat`.
-3. Backend tạo `thread_id`, chuyển các tin nhắn thành context và gọi LangGraph.
-4. Planner dùng Groq quyết định gọi `summarize_conversation`.
-5. Tool gửi context tới Groq để tạo đúng một bản tóm tắt.
-6. Planner trả kết quả cuối; frontend hiển thị trong panel.
-
-### 6.3 Hành động cần xác nhận
-
-1. Planner tạo tool call cho calendar hoặc reminder.
-2. Tool gọi `interrupt()` với bản nháp.
-3. `/chat` trả `status: interrupted`, `thread_id` và nội dung bản nháp.
-4. Client phải gọi `/chat/resume` với quyết định và phần chỉnh sửa nếu có.
-5. Tool chỉ thực hiện hành động thật khi `approved = true`.
-
-Bước 4 chưa được frontend hiện tại triển khai.
-
-## 7. Cấu hình và triển khai
-
-Các biến môi trường quan trọng:
-
-| Biến | Mục đích |
-| --- | --- |
-| `GROQ_API_KEY` | Gọi LLM Groq |
-| `MODEL_NAME` | Model LLM, mặc định `llama-3.3-70b-versatile` |
-| `DATABASE_URL` | Kết nối database, mặc định SQLite |
-| `SECRET_KEY` | Ký JWT |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Thời hạn JWT |
-| `INITIAL_ADMIN_EMAIL` | Tự gán admin khi đăng ký đúng email |
-| `CORS_ORIGINS` | Danh sách origin frontend được phép |
-| `GOOGLE_CREDENTIALS_PATH` | OAuth client credentials Google |
-| `GOOGLE_TOKEN_PATH` | OAuth token Google đã cấp quyền |
-| `GOOGLE_CALENDAR_ID` | Calendar đích |
-| `CALENDAR_TIMEZONE` | Múi giờ tạo sự kiện |
-| `SCHEDULER_TIMEZONE` | Múi giờ của scheduler |
-| `VITE_API_BASE_URL` | REST URL mà frontend sử dụng |
-| `VITE_WS_BASE_URL` | WebSocket URL mà frontend sử dụng |
-
-`Dockerfile` và `docker-compose.yml` hiện chỉ đóng gói backend. Frontend được chạy riêng bằng Vite; repository chưa định nghĩa frontend service trong Compose.
-
-## 8. Bảo mật và giới hạn cần lưu ý
-
-- Mật khẩu được hash bằng bcrypt và API nghiệp vụ chính dùng JWT.
-- API admin có kiểm tra role ở backend, không chỉ ẩn giao diện.
-- Membership được kiểm tra trước khi đọc hoặc gửi tin nhắn trong hội thoại.
-- Tool tạo calendar/reminder bắt buộc xác nhận ở cấp LangGraph.
-- Hai endpoint `/api/v1/chat` và `/api/v1/chat/resume` **chưa yêu cầu JWT ở backend** dù frontend có gửi token.
-- Toggle quyền cho AI đọc hội thoại mới tồn tại ở frontend; backend chưa có bảng hoặc policy thực thi quyền này.
-- Nội dung được chọn để tóm tắt được gửi tới Groq; chưa có cơ chế E2E hoặc vùng xử lý riêng như yêu cầu đề bài.
-- Reminder và checkpoint AI đang nằm trong RAM nên không bền vững qua restart và không phù hợp khi chạy nhiều backend instance.
-- Chưa có rate limiting, audit log cho thao tác admin/AI, database migration chuẩn hoặc vector store.
-- Tài khoản bị đặt `is_active = false` không thể dùng dependency xác thực cho API bảo vệ, nhưng endpoint login hiện vẫn có thể cấp token trước khi các API sau từ chối token đó.
-
-## 9. Bản đồ mã nguồn
-
-| Khu vực | Đường dẫn |
-| --- | --- |
-| FastAPI entry point | `src/main.py` |
-| REST routes | `src/api/` |
-| WebSocket | `src/websocket/` |
-| Auth/JWT | `src/auth/` |
-| SQLAlchemy models/session | `src/db/` |
-| LangGraph graph, node và tools | `src/agents/` |
-| LLM, scheduler và chat services | `src/services/` |
-| Pydantic schemas | `src/models/` |
-| React app | `Frontend/src/` |
-| Frontend API clients | `Frontend/src/api/` |
-| Frontend routing | `Frontend/src/router/` |
-| Backend tests | `tests/` |
+Chi tiết kỹ thuật, boundary và các quyết định thiết kế nằm trong [ARCHITECTURE.md](ARCHITECTURE.md).

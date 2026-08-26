@@ -13,8 +13,19 @@ class AdminUserOut(BaseModel):
     email: str
     display_name: str
     role: str
+    platform_role: Literal["user", "platform_admin"]
     is_active: bool
     created_at: datetime
+    personal_workspace_id: str | None = None
+
+
+class AdminWorkspaceOut(BaseModel):
+    id: str
+    name: str
+    type: Literal["personal", "organization"]
+    status: Literal["active", "suspended", "deleting"]
+    owner_user_id: str | None
+    owner_email: str | None
 
 
 class AdminStats(BaseModel):
@@ -96,6 +107,7 @@ class AdminAIUsageReport(BaseModel):
 
 class AdminAuditLogOut(BaseModel):
     id: str
+    workspace_id: str | None
     actor_user_id: str | None
     actor_email: str | None
     actor_display_name: str | None
@@ -104,6 +116,7 @@ class AdminAuditLogOut(BaseModel):
     target_type: str
     target_id: str | None
     metadata: dict[str, Any]
+    ip_address: str | None
     created_at: datetime
 
 
@@ -117,7 +130,6 @@ class UpdateRoleRequest(BaseModel):
 
 
 class UpdateBudgetRequest(BaseModel):
-    # 0 means "unlimited" (matches usage_service.is_over_budget's existing `if not budget` treatment).
     daily_token_budget: int = Field(..., ge=0)
 
 

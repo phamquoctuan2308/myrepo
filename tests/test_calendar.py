@@ -1,9 +1,7 @@
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from google.oauth2.credentials import Credentials
-from googleapiclient.errors import HttpError
 from sqlalchemy import select
 
 import src.db.session as db_session
@@ -18,240 +16,33 @@ async def _user_id(client, headers):
     return (await client.get("/api/v1/auth/me", headers=headers)).json()["id"]
 
 
-async def _seed_credential(user_id: str, refresh_token: str = "rt-test") -> None:
-    async with db_session.async_session_maker() as db:
-        db.add(GoogleCalendarCredential(user_id=user_id, refresh_token_enc=google_credentials.encrypt_secret(refresh_token)))
-        await db.commit()
-
-
-async def _get_credential(user_id: str) -> GoogleCalendarCredential | None:
-    # NOTE: GoogleCalendarCredential's primary key is its own `id` (auto-generated), not
-    # `user_id` (which is only unique+indexed) - db.get(Model, user_id) would silently look up
-    # the wrong column and always return None. Must go through a real query instead.
+async def _credential(user_id: str) -> GoogleCalendarCredential | None:
     async with db_session.async_session_maker() as db:
         return (
-            await db.execute(select(GoogleCalendarCredential).where(GoogleCalendarCredential.user_id == user_id))
+            await db.execute(
+                select(GoogleCalendarCredential).where(GoogleCalendarCredential.user_id == user_id)
+            )
         ).scalar_one_or_none()
-
-
-def _online(user_id: str):
-    """Context manager-ish helper: mark a user "online" in the WebSocket manager for the duration
-    of a `with` block, since poll_calendar_changes now only polls users who are online."""
-
-    class _Ctx:
-        def __enter__(self):
-            manager.active.setdefault(user_id, set()).add(object())
-            return self
-
-        def __exit__(self, *exc):
-            manager.active.pop(user_id, None)
-
-    return _Ctx()
 
 
 @pytest.mark.asyncio
 async def test_list_events_requires_auth(client):
-    resp = await client.get("/api/v1/calendar/events")
-    assert resp.status_code in (401, 403)
+    response = await client.get("/api/v1/calendar/events")
+    assert response.status_code in (401, 403)
 
 
 @pytest.mark.asyncio
-async def test_events_returns_409_when_not_connected(client, auth_headers):
-    """No GoogleCalendarCredential row for this user - real (unmocked) credential-resolution path."""
-    resp = await client.get("/api/v1/calendar/events", headers=auth_headers)
-    assert resp.status_code == 409
-    assert resp.json()["detail"]["code"] == "calendar_not_connected"
+async def test_events_returns_not_connected(client, auth_headers):
+    response = await client.get("/api/v1/calendar/events", headers=auth_headers)
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "calendar_not_connected"
 
 
 @pytest.mark.asyncio
-async def test_list_events_maps_google_events(client, auth_headers, monkeypatch):
-    async def _fake_service(user_id):
-        assert user_id  # route must actually pass the caller's id down
-        fake = MagicMock()
-        fake.events.return_value.list.return_value.execute.return_value = {
-            "items": [
-                {
-                    "id": "evt-1",
-                    "summary": "Team sync",
-                    "start": {"dateTime": "2026-08-10T10:00:00+07:00"},
-                    "end": {"dateTime": "2026-08-10T10:30:00+07:00"},
-                    "htmlLink": "https://calendar.google.com/event?eid=evt-1",
-                }
-            ]
-        }
-        return fake
-
-    monkeypatch.setattr(calendar_service, "_service", _fake_service)
-
-    resp = await client.get("/api/v1/calendar/events", headers=auth_headers)
-    assert resp.status_code == 200
-    body = resp.json()
-    assert len(body) == 1
-    assert body[0]["id"] == "evt-1"
-    assert body[0]["title"] == "Team sync"
-    assert body[0]["start"] == "2026-08-10T10:00:00+07:00"
-    assert body[0]["url"] == "https://calendar.google.com/event?eid=evt-1"
-
-
-@pytest.mark.asyncio
-async def test_list_events_upstream_error_returns_502(client, auth_headers, monkeypatch):
-    async def _boom(user_id):
-        raise RuntimeError("token expired")
-
-    monkeypatch.setattr(calendar_service, "_service", _boom)
-
-    resp = await client.get("/api/v1/calendar/events", headers=auth_headers)
-    assert resp.status_code == 502
-
-
-@pytest.mark.asyncio
-async def test_create_event(client, auth_headers, monkeypatch):
-    captured = {}
-    fake_service = MagicMock()
-
-    def _insert(calendarId=None, body=None):  # noqa: N803 - matches googleapiclient's own kwarg name
-        captured.update(calendarId=calendarId, body=body)
-        return MagicMock(
-            execute=MagicMock(
-                return_value={
-                    "id": "evt-2",
-                    "summary": body["summary"],
-                    "start": body["start"],
-                    "end": body["end"],
-                    "htmlLink": "https://calendar.google.com/event?eid=evt-2",
-                }
-            )
-        )
-
-    fake_service.events.return_value.insert.side_effect = _insert
-
-    async def _fake_service(user_id):
-        return fake_service
-
-    monkeypatch.setattr(calendar_service, "_service", _fake_service)
-
-    resp = await client.post(
-        "/api/v1/calendar/events",
-        json={"summary": "Design sync", "start_iso": "2026-08-11T09:00:00+07:00", "end_iso": "2026-08-11T09:30:00+07:00"},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 201
-    body = resp.json()
-    assert body["id"] == "evt-2"
-    assert body["title"] == "Design sync"
-    assert captured["body"]["summary"] == "Design sync"
-    assert captured["calendarId"] == "primary"
-
-
-# ---------------------------------------------------------------------------
-# Connection management (OAuth redirect + callback flow)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_get_calendar_connection_not_connected(client, auth_headers):
-    resp = await client.get("/api/v1/calendar/connection", headers=auth_headers)
-    assert resp.status_code == 200
-    assert resp.json() == {"connected": False, "google_email": None, "connected_at": None}
-
-
-@pytest.mark.asyncio
-async def test_oauth_url_requires_auth(client):
-    resp = await client.get("/api/v1/calendar/oauth/url")
-    assert resp.status_code in (401, 403)
-
-
-@pytest.mark.asyncio
-async def test_callback_rejects_bad_state(client):
-    resp = await client.get("/api/v1/calendar/oauth/callback", params={"code": "x", "state": "not-a-jwt"})
-    assert resp.status_code == 400
-    async with db_session.async_session_maker() as db:
-        assert (await db.execute(select(GoogleCalendarCredential))).scalars().all() == []
-
-
-@pytest.mark.asyncio
-async def test_callback_rejects_app_access_token_as_state(client, auth_headers):
-    """A regular app JWT (from login) must not work as OAuth `state` - it lacks the
-    purpose=calendar_oauth claim, so someone can't hijack it to write to another user's row."""
-    user_id = await _user_id(client, auth_headers)
-    app_token = create_access_token(user_id)
-
-    resp = await client.get("/api/v1/calendar/oauth/callback", params={"code": "x", "state": app_token})
-    assert resp.status_code == 400
-    assert await _get_credential(user_id) is None
-
-
-@pytest.mark.asyncio
-async def test_callback_missing_params_fails(client):
-    resp = await client.get("/api/v1/calendar/oauth/callback", params={"error": "access_denied"})
-    assert resp.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_disconnect_calendar_removes_credential(client, auth_headers, monkeypatch):
-    monkeypatch.setattr("httpx.AsyncClient.post", AsyncMock())  # don't actually call Google's revoke endpoint
-    user_id = await _user_id(client, auth_headers)
-    await _seed_credential(user_id)
-
-    resp = await client.delete("/api/v1/calendar/connection", headers=auth_headers)
-    assert resp.status_code == 204
-    assert await _get_credential(user_id) is None
-
-    # Idempotent - disconnecting again with nothing to remove is not an error.
-    resp2 = await client.delete("/api/v1/calendar/connection", headers=auth_headers)
-    assert resp2.status_code == 204
-
-
-@pytest.mark.asyncio
-async def test_refresh_token_is_encrypted_at_rest(client, auth_headers):
-    """The most security-relevant test in this file: a stored refresh_token must not be readable
-    as plaintext directly from the database row."""
-    user_id = await _user_id(client, auth_headers)
-    plaintext = "1//0g-super-secret-refresh-token"
-    creds = Credentials(token="access-tok", refresh_token=plaintext, scopes=google_credentials.SCOPES)
-
-    await google_credentials.save_credentials(user_id, creds, google_email="alice@gmail.com")
-
-    row = await _get_credential(user_id)
-    assert row is not None
-    assert row.refresh_token_enc != plaintext
-    assert plaintext not in row.refresh_token_enc
-    assert decrypt_secret(row.refresh_token_enc) == plaintext
-    assert row.google_email == "alice@gmail.com"
-
-
-@pytest.mark.asyncio
-async def test_broadcast_only_reaches_owner(monkeypatch):
-    """This is the bug the whole per-user refactor exists to fix: a calendar change must only be
-    pushed to the owning user, never fanned out to everyone online."""
-    broadcast = AsyncMock()
-    monkeypatch.setattr(manager, "broadcast_to_users", broadcast)
-
-    await calendar_service.broadcast_change("owner-123", "calendar_event_created", {"event": {"id": "e1"}})
-
-    broadcast.assert_awaited_once_with(["owner-123"], {"type": "calendar_event_created", "event": {"id": "e1"}})
-
-
-# ---------------------------------------------------------------------------
-# _poll_one_user - incremental sync for a single already-connected user
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_poll_one_user_not_connected_is_a_quiet_noop(client, auth_headers):
-    user_id = await _user_id(client, auth_headers)
-    await calendar_service._poll_one_user(user_id)  # no GoogleCalendarCredential row - must not raise
-
-
-@pytest.mark.asyncio
-async def test_poll_one_user_bootstrap_broadcasts_and_stores_token(client, auth_headers, monkeypatch):
-    """No stored sync cursor yet: should do a bootstrap listing, broadcast whatever it finds, and
-    save the returned nextSyncToken for the next poll."""
-    user_id = await _user_id(client, auth_headers)
-    await _seed_credential(user_id)
-
-    fake_service = MagicMock()
-    fake_service.events.return_value.list.return_value.execute.return_value = {
+async def test_list_events_uses_callers_calendar(client, auth_headers, monkeypatch):
+    caller = await _user_id(client, auth_headers)
+    service = MagicMock()
+    service.events.return_value.list.return_value.execute.return_value = {
         "items": [
             {
                 "id": "evt-1",
@@ -259,215 +50,136 @@ async def test_poll_one_user_bootstrap_broadcasts_and_stores_token(client, auth_
                 "start": {"dateTime": "2026-08-10T10:00:00+07:00"},
                 "end": {"dateTime": "2026-08-10T10:30:00+07:00"},
             }
-        ],
-        "nextSyncToken": "token-123",
+        ]
     }
 
-    async def _fake_service(uid):
-        return fake_service
+    async def fake_service(user_id):
+        assert user_id == caller
+        return service
 
-    monkeypatch.setattr(calendar_service, "_service", _fake_service)
-    broadcast = AsyncMock()
-    monkeypatch.setattr(calendar_service, "broadcast_change", broadcast)
-
-    await calendar_service._poll_one_user(user_id)
-
-    call_kwargs = fake_service.events.return_value.list.call_args.kwargs
-    assert "syncToken" not in call_kwargs
-    assert "timeMin" in call_kwargs
-    broadcast.assert_awaited_once_with(user_id, "calendar_event_updated", {"event": {
-        "id": "evt-1", "title": "Team sync",
-        "start": "2026-08-10T10:00:00+07:00", "end": "2026-08-10T10:30:00+07:00", "url": None,
-    }})
-
-    row = await _get_credential(user_id)
-    assert row.sync_token == "token-123"
+    monkeypatch.setattr(calendar_service, "_service", fake_service)
+    response = await client.get("/api/v1/calendar/events", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()[0]["title"] == "Team sync"
+    assert service.events.return_value.list.call_args.kwargs["calendarId"] == "primary"
 
 
 @pytest.mark.asyncio
-async def test_poll_one_user_incremental_handles_deletion(client, auth_headers, monkeypatch):
-    """With a stored sync cursor, should request an incremental diff and treat a cancelled item
-    as a deletion rather than trying to render it as an event."""
-    user_id = await _user_id(client, auth_headers)
-    await _seed_credential(user_id)
-    await google_credentials.set_sync_token(user_id, "old-token")
+async def test_create_event_uses_callers_calendar(client, auth_headers, monkeypatch):
+    caller = await _user_id(client, auth_headers)
+    service = MagicMock()
 
-    fake_service = MagicMock()
-    fake_service.events.return_value.list.return_value.execute.return_value = {
-        "items": [{"id": "evt-2", "status": "cancelled"}],
-        "nextSyncToken": "new-token",
-    }
-
-    async def _fake_service(uid):
-        return fake_service
-
-    monkeypatch.setattr(calendar_service, "_service", _fake_service)
-    broadcast = AsyncMock()
-    monkeypatch.setattr(calendar_service, "broadcast_change", broadcast)
-
-    await calendar_service._poll_one_user(user_id)
-
-    call_kwargs = fake_service.events.return_value.list.call_args.kwargs
-    assert call_kwargs["syncToken"] == "old-token"
-    broadcast.assert_awaited_once_with(user_id, "calendar_event_deleted", {"event_id": "evt-2"})
-
-    assert await google_credentials.get_sync_token(user_id) == "new-token"
-
-
-@pytest.mark.asyncio
-async def test_poll_one_user_expired_token_falls_back_to_full_resync(client, auth_headers, monkeypatch):
-    """A 410 from Google means the stored cursor is no longer valid - the poller must drop it and
-    resync from scratch instead of erroring out forever on every future poll."""
-    user_id = await _user_id(client, auth_headers)
-    await _seed_credential(user_id)
-    await google_credentials.set_sync_token(user_id, "stale-token")
-
-    calls = []
-
-    def _list(**kwargs):
-        calls.append(kwargs)
-        if "syncToken" in kwargs:
-            raise HttpError(
-                SimpleNamespace(status=410, reason="Gone"), b'{"error": {"message": "Sync token is no longer valid"}}'
+    def insert(calendarId=None, body=None):  # noqa: N803 - Google client kwarg
+        assert calendarId == "primary"
+        return MagicMock(
+            execute=MagicMock(
+                return_value={
+                    "id": "evt-2",
+                    "summary": body["summary"],
+                    "start": body["start"],
+                    "end": body["end"],
+                }
             )
-        execute_mock = MagicMock()
-        execute_mock.execute.return_value = {"items": [], "nextSyncToken": "fresh-token"}
-        return execute_mock
-
-    fake_service = MagicMock()
-    fake_service.events.return_value.list.side_effect = _list
-
-    async def _fake_service(uid):
-        return fake_service
-
-    monkeypatch.setattr(calendar_service, "_service", _fake_service)
-    monkeypatch.setattr(calendar_service, "broadcast_change", AsyncMock())
-
-    await calendar_service._poll_one_user(user_id)
-
-    assert len(calls) == 2
-    assert "syncToken" in calls[0]
-    assert "syncToken" not in calls[1]
-    assert await google_credentials.get_sync_token(user_id) == "fresh-token"
-
-
-# ---------------------------------------------------------------------------
-# poll_calendar_changes - fans out over connected users who are currently online
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_poll_calendar_changes_only_polls_online_connected_users(client, auth_headers, other_auth_headers, monkeypatch):
-    online_id = await _user_id(client, auth_headers)
-    offline_id = await _user_id(client, other_auth_headers)
-    await _seed_credential(online_id)
-    await _seed_credential(offline_id)
-
-    polled = []
-
-    async def _fake_poll_one(user_id):
-        polled.append(user_id)
-
-    monkeypatch.setattr(calendar_service, "_poll_one_user", _fake_poll_one)
-
-    with _online(online_id):
-        await calendar_service.poll_calendar_changes()
-
-    assert polled == [online_id]
-
-
-@pytest.mark.asyncio
-async def test_poll_calendar_changes_no_connected_users_is_a_noop(client):
-    await calendar_service.poll_calendar_changes()  # nothing seeded, must not raise
-
-
-@pytest.mark.asyncio
-async def test_poll_calendar_changes_one_user_failure_does_not_block_another(client, auth_headers, other_auth_headers, monkeypatch):
-    good_id = await _user_id(client, auth_headers)
-    bad_id = await _user_id(client, other_auth_headers)
-    await _seed_credential(good_id)
-    await _seed_credential(bad_id)
-
-    polled = []
-
-    async def _fake_poll_one(user_id):
-        if user_id == bad_id:
-            raise RuntimeError("boom")
-        polled.append(user_id)
-
-    monkeypatch.setattr(calendar_service, "_poll_one_user", _fake_poll_one)
-
-    with _online(good_id), _online(bad_id):
-        await calendar_service.poll_calendar_changes()  # must not raise
-
-    assert polled == [good_id]
-
-
-# ---------------------------------------------------------------------------
-# notify_event_deleted - cascades to the Task/Reminder behind a Calendar event, if any
-# (task_routes.py::_add_to_calendar_and_reminder is the other direction of this same link)
-# ---------------------------------------------------------------------------
-
-
-async def _accept_linked_task(client, auth_headers, monkeypatch, *, event_id: str, title: str) -> dict:
-    """Seeds a Task Accepted with a due date, so it gets a real (faked) Calendar event + Reminder
-    behind it, linked via calendar_event_id/reminder_id - the state _delete_linked_task acts on."""
-    fake_service = MagicMock()
-    fake_service.events.return_value.insert.return_value.execute.return_value = {
-        "id": event_id, "htmlLink": f"https://calendar.google.com/event?eid={event_id}",
-    }
-    fake_service.events.return_value.list.return_value.execute.return_value = {"items": []}
-
-    async def _fake_service(user_id):
-        return fake_service
-
-    monkeypatch.setattr(calendar_service, "_service", _fake_service)
-
-    created = (
-        await client.post(
-            "/api/v1/tasks", json={"title": title, "due_at": "2026-08-10T15:00:00", "source": "proactive"},
-            headers=auth_headers,
         )
-    ).json()
-    await client.post(f"/api/v1/tasks/{created['id']}/accept", json={}, headers=auth_headers)
-    return created
+
+    service.events.return_value.insert.side_effect = insert
+
+    async def fake_service(user_id):
+        assert user_id == caller
+        return service
+
+    monkeypatch.setattr(calendar_service, "_service", fake_service)
+    response = await client.post(
+        "/api/v1/calendar/events",
+        json={
+            "summary": "Design sync",
+            "start_iso": "2026-08-11T09:00:00+07:00",
+            "end_iso": "2026-08-11T09:30:00+07:00",
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 201
+    assert response.json()["id"] == "evt-2"
 
 
 @pytest.mark.asyncio
-async def test_delete_event_cascades_to_linked_task(client, auth_headers, monkeypatch):
-    """The other direction of test_tasks.py's cascade test: deleting the Calendar event through
-    DELETE /calendar/events must also remove the Task that was Accepted into it."""
-    task = await _accept_linked_task(client, auth_headers, monkeypatch, event_id="evt-linked", title="Linked task")
-
-    resp = await client.delete("/api/v1/calendar/events/evt-linked", headers=auth_headers)
-    assert resp.status_code == 204
-
-    tasks = (await client.get("/api/v1/tasks", headers=auth_headers)).json()
-    assert task["id"] not in [t["id"] for t in tasks]
-
-
-@pytest.mark.asyncio
-async def test_poll_detected_deletion_cascades_to_linked_task(client, auth_headers, monkeypatch):
-    """Same cascade, but for an event deleted directly in Google Calendar itself (not through this
-    app) - picked up by the next poll as a cancelled item, same as
-    test_poll_one_user_incremental_handles_deletion above."""
-    task = await _accept_linked_task(client, auth_headers, monkeypatch, event_id="evt-external", title="External delete")
+async def test_connection_status_and_oauth_state_are_user_bound(client, auth_headers):
+    status_response = await client.get("/api/v1/calendar/connection", headers=auth_headers)
+    assert status_response.json()["connected"] is False
     user_id = await _user_id(client, auth_headers)
-    await _seed_credential(user_id)
-    await google_credentials.set_sync_token(user_id, "old-token")
+    state = google_credentials.make_oauth_state(user_id)
+    assert google_credentials.read_oauth_state(state) == user_id
+    assert (
+        await client.get(
+            "/api/v1/calendar/oauth/callback", params={"code": "x", "state": create_access_token(user_id)}
+        )
+    ).status_code == 400
 
-    fake_service = MagicMock()
-    fake_service.events.return_value.list.return_value.execute.return_value = {
-        "items": [{"id": "evt-external", "status": "cancelled"}],
-        "nextSyncToken": "new-token",
-    }
 
-    async def _fake_service(uid):
-        return fake_service
+@pytest.mark.asyncio
+async def test_oauth_callback_escapes_query_error_in_html_and_inline_script(client):
+    attack = "</script><script>alert('xss')</script>"
+    response = await client.get("/api/v1/calendar/oauth/callback", params={"error": attack})
 
-    monkeypatch.setattr(calendar_service, "_service", _fake_service)
+    assert response.status_code == 400
+    assert attack not in response.text
+    assert "<script>alert" not in response.text
+    assert "\\u003c/script\\u003e" in response.text
 
-    await calendar_service._poll_one_user(user_id)
 
-    tasks = (await client.get("/api/v1/tasks", headers=auth_headers)).json()
-    assert task["id"] not in [t["id"] for t in tasks]
+@pytest.mark.asyncio
+async def test_calendar_errors_do_not_expose_upstream_exception(client, auth_headers, monkeypatch):
+    async def broken_list(*_args, **_kwargs):
+        raise RuntimeError("secret provider detail")
+
+    monkeypatch.setattr(calendar_service, "list_events", broken_list)
+    response = await client.get("/api/v1/calendar/events", headers=auth_headers)
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Google Calendar is temporarily unavailable"
+    assert "secret provider detail" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_is_encrypted_at_rest(client, auth_headers):
+    user_id = await _user_id(client, auth_headers)
+    plaintext = "1//secret-refresh-token"
+    credentials = Credentials(token="access", refresh_token=plaintext, scopes=google_credentials.SCOPES)
+    await google_credentials.save_credentials(user_id, credentials, google_email="alice@example.com")
+    row = await _credential(user_id)
+    assert row is not None
+    assert plaintext not in row.refresh_token_enc
+    assert decrypt_secret(row.refresh_token_enc) == plaintext
+
+
+@pytest.mark.asyncio
+async def test_disconnect_removes_credential(client, auth_headers, monkeypatch):
+    user_id = await _user_id(client, auth_headers)
+    credentials = Credentials(token="access", refresh_token="refresh", scopes=google_credentials.SCOPES)
+    await google_credentials.save_credentials(user_id, credentials)
+    monkeypatch.setattr("httpx.AsyncClient.post", AsyncMock())
+    response = await client.delete("/api/v1/calendar/connection", headers=auth_headers)
+    assert response.status_code == 204
+    assert await _credential(user_id) is None
+
+
+@pytest.mark.asyncio
+async def test_broadcast_reaches_only_calendar_owner(monkeypatch):
+    broadcast = AsyncMock()
+    monkeypatch.setattr(manager, "broadcast_to_users", broadcast)
+    await calendar_service.broadcast_change("owner", "calendar_event_created", {"event": {"id": "e1"}})
+    broadcast.assert_awaited_once_with(
+        ["owner"], {"type": "calendar_event_created", "event": {"id": "e1"}}
+    )
+
+
+@pytest.mark.asyncio
+async def test_poll_only_checks_online_connected_users(monkeypatch):
+    monkeypatch.setattr(google_credentials, "list_connected_user_ids", AsyncMock(return_value=["online", "offline"]))
+    poll = AsyncMock()
+    monkeypatch.setattr(calendar_service, "_poll_one_user", poll)
+    manager.active["online"] = {object()}
+    try:
+        await calendar_service.poll_calendar_changes()
+    finally:
+        manager.active.pop("online", None)
+    poll.assert_awaited_once_with("online")

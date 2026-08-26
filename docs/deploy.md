@@ -1,190 +1,162 @@
-# Hướng dẫn deploy — bấm dashboard từng bước
+# Deploy online — Render (backend) + Supabase (Postgres) + Vercel (frontend)
 
-Đây là bản hướng dẫn thao tác cụ thể đi kèm [../DEPLOYMENT.md](../DEPLOYMENT.md) (kế hoạch + quyết
-định — đọc trước file đó để hiểu **vì sao**, file này chỉ trả lời **bấm gì ở đâu**). Thứ tự dưới đây
-là D-1 "Dựng hạ tầng" trong DEPLOYMENT.md.
+Hướng dẫn deploy production thật cho Orbit. Đây là hạng mục ưu tiên #1 còn thiếu theo
+[ROADMAP.md](../ROADMAP.md)/[ARCHITECTURE.md](../ARCHITECTURE.md) — đề bài gốc
+([Frontend/detai.md](../Frontend/detai.md)) yêu cầu bắt buộc "App deploy online, đăng nhập, ≥2 vai
+trò".
 
-**Quyết định đã chốt ở đây:** deploy **cả 2 app frontend** (`Frontend/user/` và `Frontend/admin/`)
-thành **2 Vercel project riêng** — mỗi app đã có `package.json`/`vite.config.js` độc lập, tách project
-đơn giản hơn và đúng với cấu trúc thật hiện tại hơn là gộp lại. Nếu chỉ cần demo tính năng user, có
-thể bỏ qua toàn bộ phần "Vercel — app admin" bên dưới và không tạo project đó.
+Stack đã chốt: **Render** (backend, build từ [Dockerfile](../Dockerfile) hiện có) + **Supabase**
+(Postgres managed, free tier vĩnh viễn) + **Vercel** (frontend Vite) + **GitHub Actions** làm CD,
+gate deploy sau khi CI (lint+test) pass trên `main`. Render free tier tự sleep sau 15 phút không
+request (kéo theo APScheduler trong process — reminders, calendar polling — cũng dừng theo), nên có
+thêm 1 workflow keep-alive ping `/health` mỗi ~10 phút để giảm thiểu (không loại bỏ hoàn toàn) rủi ro
+reminder trễ giờ.
 
-Trước khi bắt đầu, hoàn tất checklist D-2 trong DEPLOYMENT.md (build Docker local đã chạy được,
-`pytest`/`ruff` xanh, đã sinh `SECRET_KEY`/`CREDENTIAL_ENCRYPTION_KEY`, đã chốt tên service).
+File liên quan đã có sẵn trong repo, không cần tạo thêm gì ở bước thao tác dashboard dưới đây:
+[Dockerfile](../Dockerfile) (CMD dùng `$PORT`), [render.yaml](../render.yaml) (Render Blueprint),
+[.github/workflows/deploy.yml](../.github/workflows/deploy.yml) (CD),
+[.github/workflows/keep-alive.yml](../.github/workflows/keep-alive.yml) (chống sleep),
+[.github/workflows/ci.yml](../.github/workflows/ci.yml) (đã có Postgres service container),
+[Frontend/vercel.json](../Frontend/vercel.json) (SPA rewrite),
+[src/db/session.py](../src/db/session.py) (SSL cho asyncpg khi nối Supabase).
 
-Quy ước tên dùng xuyên suốt bên dưới — đổi nếu bạn chọn tên khác, nhưng đổi nhất quán ở mọi bước:
+## Các bước thủ công bắt buộc (trình duyệt/dashboard), ĐÚNG THỨ TỰ
 
-| Placeholder | Giá trị ví dụ |
-|---|---|
-| `<backend-url>` | `https://orbit-backend.onrender.com` |
-| `<user-url>` | `https://orbit-user.vercel.app` |
-| `<admin-url>` | `https://orbit-admin.vercel.app` |
+Không AI coding assistant nào thao tác được trình duyệt — toàn bộ mục này người có quyền truy cập
+GitHub repo + tạo được account Render/Supabase/Vercel/Google Cloud Console phải tự làm.
 
----
+**Bước 0:** Merge xong PR chứa các file ở trên vào `main`, xác nhận `ci.yml` XANH THẬT trên `main`
+(không chỉ trên PR) — CI trước đây thiếu Postgres service, gate "deploy sau khi CI pass" vô nghĩa nếu
+CI chưa từng thực sự chạy được.
 
-## Bước 1 — Supabase (Postgres)
+1. **Chốt tên trước** (quyết định URL trước khi tạo gì cả): Render service name (vd `orbit-backend`
+   → `https://orbit-backend.onrender.com`), Vercel project name (vd `orbit-frontend` →
+   `https://orbit-frontend.vercel.app`). Ghi lại 2 URL này, dùng xuyên suốt các bước dưới.
+2. **Tạo Supabase project**: supabase.com → New project → region gần nhất (Singapore nếu có) → đặt
+   mật khẩu DB mạnh, lưu lại → đợi provisioning xong (vài phút).
+3. **Lấy connection string — chọn đúng "Session pooler"**: Project Settings → Database →
+   "Connection string" → tab **Session pooler** (KHÔNG "Direct connection" — thường IPv6-only, Render
+   không connect được; KHÔNG "Transaction pooler" port 6543 — phá server-side prepared statement mà
+   asyncpg dùng mặc định, trừ khi sửa thêm code) → copy URI, thay `[YOUR-PASSWORD]` bằng mật khẩu
+   thật ở bước 2. **Không thêm `?ssl=...`/`?sslmode=...` vào chuỗi này** — SSL đã được xử lý riêng
+   cho từng driver trong [src/db/session.py](../src/db/session.py) (asyncpg dùng `ssl` kwarg,
+   psycopg dùng `sslmode` kiểu libpq; 1 query-param chung sẽ phá 1 trong 2). Đây là giá trị
+   `DATABASE_URL`.
+4. **Generate 2 secret** (chạy local, có sẵn để dán ở bước 5):
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(48))"          # -> SECRET_KEY
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # -> CREDENTIAL_ENCRYPTION_KEY
+   ```
+5. **Tạo Render service qua Blueprint**: render.com → New + → Blueprint → connect GitHub repo →
+   Render đọc [render.yaml](../render.yaml), preview 1 web service tên đã chốt ở bước 1 → Apply. Điền
+   các biến `sync: false` khi được hỏi:
+   - `DATABASE_URL` = bước 3
+   - `SECRET_KEY`, `CREDENTIAL_ENCRYPTION_KEY` = bước 4
+   - `GOOGLE_API_KEY` (hoặc `GROQ_API_KEY`/`OPENAI_API_KEY` tuỳ `LLM_PROVIDER`), `GOOGLE_OAUTH_CLIENT_ID`,
+     `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET` = giá trị thật của nhóm
+   - `ADMIN_BOOTSTRAP_KEY` = khóa bí mật dùng một lần để tạo admin đầu tiên từ Admin frontend
+   - `GOOGLE_CALENDAR_REDIRECT_URI` = `https://<render-url>/api/v1/calendar/oauth/callback`
+   - `CORS_ORIGINS` = `https://<vercel-url>` (không khoảng trắng nếu sau này thêm nhiều origin —
+     `src/main.py` dùng `.split(",")` không `.strip()`)
+   - `FRONTEND_ORIGIN` = `https://<vercel-url>`
 
-1. [supabase.com](https://supabase.com) → New project → chọn region gần Render nhất (Singapore nếu
-   Render deploy ở đó) → đặt mật khẩu DB, lưu ngay vào password manager.
-2. Đợi project khởi tạo xong (~2 phút) → **Project Settings → Database → Connection string**.
-3. Chọn tab **Session pooler** (port `5432`), **KHÔNG** chọn Transaction pooler (`6543`) — pooler
-   transaction phá server-side prepared statement mà `asyncpg` dùng mặc định (xem cảnh báo trong
-   [.env.production.example](../.env.production.example)).
-4. Copy connection string dạng `postgresql://postgres.xxxx:[PASSWORD]@...:5432/postgres`, thay
-   `[PASSWORD]` bằng mật khẩu thật đã đặt ở bước 1. Đây là giá trị `DATABASE_URL` — **không** thêm
-   `?sslmode=...` vào cuối.
-5. Lưu connection string này lại, sẽ dùng ở Bước 4.
+   Xác nhận Settings → Auto-Deploy hiện **"Off"** (đã khai `autoDeployTrigger: off` trong
+   `render.yaml` — `deploy.yml` là đường deploy duy nhất, tránh chồng chéo 2 cơ chế deploy).
+6. **Lấy Deploy Hook**: Service vừa tạo → Settings → mục "Deploy Hook" → copy URL → GitHub repo →
+   Settings → Secrets and variables → Actions → New repository **secret** tên
+   `RENDER_DEPLOY_HOOK_URL`. Đồng thời tạo repository **Variable** (tab "Variables" cạnh "Secrets")
+   tên `RENDER_URL`, giá trị `https://<render-url>` (không có dấu `/` cuối) — dùng chung cho
+   `deploy.yml` và `keep-alive.yml`.
+7. **Deploy lần đầu (thủ công)**: vì `autoDeployTrigger: off` và `deploy.yml` chỉ kích hoạt được sau
+   khi chính nó đã nằm trên `main` (`workflow_run` không trigger được từ chính lần merge đầu tiên
+   thêm file này), lần đầu phải trigger tay: Render dashboard → Manual Deploy → "Deploy latest
+   commit" — HOẶC tab Actions của repo → workflow "Deploy" → "Run workflow"
+   (`workflow_dispatch`). Theo dõi Logs tab trên Render: build Docker xong → thấy log
+   `Starting AI20K Agent in production mode` → không traceback → service chuyển "Live".
+8. **Verify backend sống**: `curl https://<render-url>/health` → kỳ vọng
+   `{"status":"ok","env":"production"}`. Lỗi/treo lâu → xem Render Logs tab tìm traceback từ
+   `init_db()` (sai `DATABASE_URL`/SSL) hoặc `init_checkpointer()` (sai psycopg conninfo).
+9. **Tạo Vercel project cho User frontend**: vercel.com → Add New → Project → import repo →
+   **Root Directory = `Frontend/user`** → Framework Preset tự nhận "Vite" (Build Command
+   `npm run build`, Output `dist` tự điền) → trước khi Deploy, thêm Environment Variables:
+   - `VITE_API_BASE_URL` = `https://<render-url>/api/v1`
+   - `VITE_WS_BASE_URL` = `wss://<render-url>/api/v1/ws` (chú ý `wss://` không phải `ws://`)
+   - `VITE_GOOGLE_CLIENT_ID` = cùng giá trị `GOOGLE_OAUTH_CLIENT_ID` đã set ở bước 5
 
-## Bước 2 — Google Cloud Console (2 OAuth Client riêng)
+   Deploy. Nếu cần giao diện Admin online, tạo **Vercel project thứ hai** với Root Directory
+   `Frontend/admin`, cùng hai biến `VITE_API_BASE_URL`/`VITE_WS_BASE_URL`, rồi thêm cả hai domain
+   vào `CORS_ORIGINS` và chọn domain Admin cho `FRONTEND_ORIGIN` nếu dùng OAuth Calendar từ Admin.
+   Cập nhật `CORS_ORIGINS`/`FRONTEND_ORIGIN` để khớp các URL thật.
+10. **Verify frontend build đúng SPA routing**: mở thẳng `https://<user-vercel-url>/tasks/inbox` (không
+    qua điều hướng từ trang chủ) hoặc F5 giữa chừng ở 1 route con → phải load được app, không phải
+    404 của Vercel (xác nhận [Frontend/vercel.json](../Frontend/vercel.json) áp dụng đúng —
+    `AppRouter.jsx` dùng `BrowserRouter`, không có rewrite sẽ 404 mọi route con).
+11. **Cập nhật Google Cloud Console** (2 OAuth Client riêng, xem `.env.example` để biết chỗ tạo) —
+    console.cloud.google.com/apis/credentials của dự án:
+    - Client dùng cho `GOOGLE_OAUTH_CLIENT_ID` ("Sign in with Google"): mở edit → **Authorized
+      JavaScript origins** → Add `https://<vercel-url>` → Save.
+    - Client dùng cho `GOOGLE_CALENDAR_CLIENT_ID` ("Connect Google Calendar"): mở edit →
+      **Authorized redirect URIs** → Add `https://<render-url>/api/v1/calendar/oauth/callback`
+      (khớp EXACT với `GOOGLE_CALENDAR_REDIRECT_URI` đã set ở bước 5, kể cả dấu `/` cuối) → Save.
+    - Nếu OAuth consent screen của Calendar Client còn ở "Testing": xác nhận mọi tài khoản Google sẽ
+      dùng để test/demo production đã có trong danh sách "Test users" — nếu không sẽ bị
+      `access_denied` dù mọi thứ khác đúng.
+    - Thay đổi có thể mất vài phút–vài giờ để Google áp dụng — đừng vội nghi code sai nếu vừa save
+      xong mà login/connect calendar vẫn lỗi.
+12. **Kích hoạt CD**: đảm bảo `RENDER_DEPLOY_HOOK_URL` (secret) và `RENDER_URL` (variable) đã set ở
+    bước 6. Push 1 commit bất kỳ lên `main` → tab Actions: `CI` chạy → xanh → `Deploy` tự trigger qua
+    `workflow_run` → job `deploy-backend` gọi Deploy Hook → step "Wait for backend to become healthy"
+    poll `/health` tới khi 200 → xanh toàn bộ. Đối chiếu Render dashboard phải thấy 1 deploy event
+    mới đúng thời điểm Actions job chạy.
+13. **Xác nhận keep-alive**: tab Actions → workflow "Keep Render Awake" → "Run workflow" (chạy tay 1
+    lần để verify ngay, không đợi cron) → log phải show `curl` thành công.
 
-Cần **2 OAuth Client** tách biệt — xem lý do ở bảng "Design Decisions" trong
-[../ARCHITECTURE.md](../ARCHITECTURE.md) (đăng nhập chỉ verify ID token, Calendar cần
-authorization-code + secret).
+## End-to-end verification trên production
 
-### 2a. OAuth Consent Screen
+Thực hiện trên chính `https://<vercel-url>`, KHÔNG dùng localhost:
 
-1. [console.cloud.google.com](https://console.cloud.google.com) → chọn hoặc tạo project → **APIs &
-   Services → OAuth consent screen**.
-2. User Type: **External** (trừ khi cả nhóm dùng chung 1 Google Workspace → **Internal**, xem P1
-   trong DEPLOYMENT.md).
-3. Thêm scope Calendar nếu chưa có (`.../auth/calendar`).
-4. **Test users**: thêm email của mọi người sẽ đăng nhập/test (kể cả admin) — thiếu bước này Google
-   trả `access_denied` ngay ở màn hình consent.
-5. Publishing status giữ **Testing** cho demo ngắn (refresh token hết hạn sau 7 ngày — xem P1
-   DEPLOYMENT.md để quyết cách xử lý trước khi qua bước tiếp).
+1. Đăng ký tài khoản mới (email/password) → không có lỗi CORS trong DevTools Console (nếu
+   `CORS_ORIGINS` sai, request `/auth/register` bị browser chặn với lỗi CORS rõ ràng, không phải lỗi
+   500 từ server).
+2. Đăng nhập lại bằng tài khoản vừa tạo → vào được các trang protected route.
+3. Thử "Sign in with Google" (nếu đã enable) → không lỗi origin/`redirect_uri_mismatch` ngay trên
+   popup Google.
+4. Gửi 1 tin nhắn chat, mở AI panel, bật quyền AI đọc hội thoại (`ai_permissions`), yêu cầu AI "tóm
+   tắt hội thoại" → có phản hồi thật từ LLM (không phải 503/timeout — nếu treo lâu, kiểm tra
+   `GOOGLE_API_KEY`/`LLM_PROVIDER` đã set đúng trên Render).
+5. Yêu cầu AI trích xuất task/tạo reminder có ngày giờ cụ thể ("nhắc tôi ngày mai 9h sáng...") → flow
+   human-in-the-loop (confirm trước khi tạo) chạy đúng, và giờ tạo ra đúng giờ Hà Nội (không lệch 7
+   tiếng — Supabase Postgres mặc định UTC khác máy dev local).
+6. Vào `/calendar`, bấm "Connect Google Calendar" → redirect qua Google thật, quay lại app, event
+   Google Calendar thật xuất hiện đúng — bài test quan trọng nhất cho bước 11 (Google Console).
+7. Tạo task/nhắc việc qua UI thường (không qua AI) → kiểm tra Supabase dashboard → Table Editor có
+   row mới (xác nhận `init_db()`'s `create_all()` đã tự tạo đúng schema trên Supabase).
+8. Mở 2 tab, xác nhận có 1 sự kiện realtime (vd reminder mới, proactive task suggestion) đẩy qua tab
+   kia không cần refresh — xác nhận `VITE_WS_BASE_URL` dùng đúng `wss://` (để nhầm `ws://` trên domain
+   HTTPS, browser block mixed-content, WebSocket không bao giờ connect được — thường là lỗi im lặng,
+   chỉ thấy trong DevTools Network tab).
+9. Mở Admin frontend, vào `/register` để tạo admin đầu tiên bằng `ADMIN_BOOTSTRAP_KEY`, sau đó
+   đăng nhập tại `/login`, xác nhận Dashboard/Users/
+   Conversations load đúng dữ liệu thật, ≥2 role (user thường không thấy menu Admin).
+10. Đợi ~16 phút không có request nào (hoặc tạm tắt keep-alive để test), gửi lại 1 request bất kỳ →
+    vẫn chạy được, chỉ chậm hơn (cold start), không lỗi cứng.
 
-### 2b. Client #1 — Sign in with Google
+## Rủi ro & Rollback
 
-1. **Credentials → Create Credentials → OAuth client ID** → Application type: **Web application**.
-2. Name: `orbit-signin`.
-3. **Authorized JavaScript origins**: thêm `<user-url>` (ví dụ `https://orbit-user.vercel.app`).
-   Không cần Authorized redirect URIs (flow này chỉ verify ID token phía client, không có callback
-   server).
-4. Create → copy **Client ID** → đây là `GOOGLE_OAUTH_CLIENT_ID` (backend) **và**
-   `VITE_GOOGLE_CLIENT_ID` (Frontend/user) — cùng 1 giá trị.
+| Tình huống | Xử lý |
+| --- | --- |
+| Deploy Hook trigger nhưng health check fail | Render không swap traffic sang bản mới — bản cũ tiếp tục chạy, không downtime. Xem Render Logs của deploy event bị fail, sửa lỗi (thường env var sai hoặc code lỗi), deploy lại. |
+| Bug phát hiện ngay sau khi deploy | `init_db()` dùng `create_all()` — chỉ thêm bảng/cột, không tự xoá/đổi tên gì, nên rollback code về version trước hoàn toàn an toàn với schema hiện tại. Render: tab "Deploys" → chọn deploy trước → "Rollback to this deploy" (1 click). Vercel: tab "Deployments" → "..." → "Promote to Production" trên bản cũ. |
+| Tương lai đổi/xoá tên cột (ngoài phạm vi tài liệu này) | `create_all()` không xử lý được rename/drop cột — nợ kỹ thuật đã biết, Alembic bị hoãn có chủ đích (xem [ROADMAP.md](../ROADMAP.md)). |
+| `DATABASE_URL` sai (Direct connection thay vì Session pooler, gõ nhầm ký tự) | Backend crash ngay ở `init_db()`/`init_checkpointer()` trong lifespan, healthcheck luôn fail. Supabase không bị ảnh hưởng gì — sửa lại `DATABASE_URL` trên Render dashboard, Manual Deploy lại. |
+| Keep-alive workflow bị GitHub tự tắt sau 60 ngày repo im lặng | Kiểm tra định kỳ tab Actions còn "Active" không; push 1 commit bất kỳ hoặc bật tay lại. |
+| `workflow_run` không bao giờ trigger `deploy.yml` | Dùng `workflow_dispatch` (đã có sẵn) để chạy tay bất cứ lúc nào, không phụ thuộc trigger tự động. |
+| Google OAuth lỗi trên production dù code/env đúng hết | Thường do bước 11 (Google Console) bị bỏ sót hoặc chưa propagate, dễ nhầm là lỗi deploy — luôn test riêng bước 3 và 6 ở phần verification sau mỗi lần đổi domain. |
 
-### 2c. Client #2 — Google Calendar (authorization-code)
+## Ngoài phạm vi tài liệu này (cố ý, không làm ở đây)
 
-1. **Create Credentials → OAuth client ID** → Web application → Name: `orbit-calendar`.
-2. **Authorized redirect URIs**: thêm đúng
-   `<backend-url>/api/v1/calendar/oauth/callback` — phải khớp EXACT (kể cả dấu `/` cuối) với
-   `GOOGLE_CALENDAR_REDIRECT_URI` sẽ khai ở Bước 4. Đây là domain **backend**, không phải frontend.
-3. Create → copy **Client ID** và **Client secret** → `GOOGLE_CALENDAR_CLIENT_ID` /
-   `GOOGLE_CALENDAR_CLIENT_SECRET`.
-4. **APIs & Services → Library** → bật **Google Calendar API** nếu chưa bật.
-
-## Bước 3 — Sinh secret
-
-Chạy local (đã có trong checklist D-2, nhắc lại ở đây để tiện copy):
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"                                  # SECRET_KEY
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"     # CREDENTIAL_ENCRYPTION_KEY
-```
-
-Lưu cả 2 vào password manager của nhóm — đổi `SECRET_KEY` sau khi có user = mọi người bị đăng xuất;
-đổi `CREDENTIAL_ENCRYPTION_KEY` sau khi có user connect Calendar = mọi refresh token thành rác.
-
-## Bước 4 — Render (backend)
-
-1. [dashboard.render.com](https://dashboard.render.com) → **New → Blueprint** → connect repo GitHub
-   chứa project này.
-2. Render đọc [render.yaml](../render.yaml) tự động. Trước khi apply, **sửa 1 dòng trong file** (rồi
-   commit/push): `plan: free` → `plan: starter` — xem lý do bắt buộc Starter (không phải free) ở mục
-   1 DEPLOYMENT.md (free sleep sau 15 phút = scheduler chết).
-3. Apply Blueprint. Render sẽ hỏi giá trị cho các biến `sync: false` — điền theo bảng dưới (đối chiếu
-   đầy đủ với [.env.production.example](../.env.production.example)):
-
-   | Biến | Giá trị |
-   |---|---|
-   | `DATABASE_URL` | Connection string Supabase (Bước 1) |
-   | `SECRET_KEY` | Sinh ở Bước 3 |
-   | `CREDENTIAL_ENCRYPTION_KEY` | Sinh ở Bước 3 |
-   | `GOOGLE_API_KEY` | API key Gemini (hoặc để trống nếu dùng Groq/OpenAI — sửa thêm `LLM_PROVIDER` trong Environment sau khi apply) |
-   | `GROQ_API_KEY` / `OPENAI_API_KEY` | Để trống nếu không dùng |
-   | `GOOGLE_OAUTH_CLIENT_ID` | Client ID #1 (Bước 2b) |
-   | `GOOGLE_CALENDAR_CLIENT_ID` | Client ID #2 (Bước 2c) |
-   | `GOOGLE_CALENDAR_CLIENT_SECRET` | Client secret #2 (Bước 2c) |
-   | `GOOGLE_CALENDAR_REDIRECT_URI` | `<backend-url>/api/v1/calendar/oauth/callback` |
-   | `INITIAL_ADMIN_EMAIL` | Email sẽ được gán role admin tự động khi đăng ký lần đầu |
-   | `CORS_ORIGINS` | `<user-url>,<admin-url>` — **không khoảng trắng sau dấu phẩy**, không `/` cuối |
-   | `FRONTEND_ORIGIN` | `<user-url>` |
-
-4. Sau khi service tạo xong, vào **Environment** → thêm/sửa 2 biến không có trong Blueprint (không
-   bắt buộc lúc apply nhưng nên đặt ngay theo D-1 trong DEPLOYMENT.md):
-   - `CALENDAR_POLL_INTERVAL_SECONDS=60` (thay vì 20 mặc định — tránh tốn quota Calendar API)
-5. Đợi build xong (theo dõi tab **Logs**) → mở `<backend-url>/health` → kỳ vọng
-   `{"status":"ok","env":"production"}`. Nếu container start rồi chết ngay, xem bảng "Sự cố hay gặp"
-   mục 6 DEPLOYMENT.md.
-6. **Settings → Deploy Hook** → copy URL (dạng `https://api.render.com/deploy/srv-xxx?key=yyy`) —
-   dùng ở Bước 6.
-
-## Bước 5 — Vercel (app user)
-
-1. [vercel.com](https://vercel.com) → **Add New → Project** → import repo GitHub.
-2. **Root Directory**: `Frontend/user` (bấm Edit cạnh Root Directory để chọn).
-3. Framework Preset: Vercel tự nhận diện Vite — giữ mặc định (Build Command `npm run build`, Output
-   Directory `dist`).
-4. **Environment Variables** — thêm 3 biến (áp dụng cho Production, Preview, Development đều được):
-
-   | Biến | Giá trị |
-   |---|---|
-   | `VITE_API_BASE_URL` | `<backend-url>/api/v1` |
-   | `VITE_WS_BASE_URL` | `wss://` + phần domain của backend + `/api/v1/ws` (ví dụ `wss://orbit-backend.onrender.com/api/v1/ws`) — **bắt buộc `wss://`, không phải `ws://`**, đây là biến build-time nên sai là phải build lại chứ đổi env không đủ |
-   | `VITE_GOOGLE_CLIENT_ID` | Client ID #1 (Bước 2b) |
-
-5. Deploy. `Frontend/user/vercel.json` đã có rewrite SPA (`/(.*) → /index.html`) nên route con
-   (`/tasks/inbox`, `/assistant`, ...) F5 không bị 404 — verify lại ở Bước D-day. (Không dùng
-   `Frontend/vercel.json` ở cấp cha — với Root Directory = `Frontend/user`, Vercel không đọc file đó.)
-6. Copy URL Vercel cấp (`<user-url>`) → quay lại Render **Environment**, cập nhật `CORS_ORIGINS` và
-   `FRONTEND_ORIGIN` nếu lúc Bước 4 mới điền placeholder — service sẽ tự restart khi đổi env.
-7. Quay lại Google Cloud Console Client #1 (Bước 2b) → xác nhận Authorized JavaScript origins đã
-   đúng `<user-url>` thật (không phải domain đoán trước).
-
-## Bước 6 — Vercel (app admin) — bỏ qua nếu demo chỉ cần phía user
-
-Lặp lại Bước 5 với khác biệt:
-
-1. **Root Directory**: `Frontend/admin`.
-2. Environment Variables: chỉ 2 biến, **không có** `VITE_GOOGLE_CLIENT_ID` (app admin không có nút
-   Sign in with Google):
-
-   | Biến | Giá trị |
-   |---|---|
-   | `VITE_API_BASE_URL` | `<backend-url>/api/v1` |
-   | `VITE_WS_BASE_URL` | `wss://.../api/v1/ws` (giống Bước 5) |
-
-3. Deploy → copy `<admin-url>` → cập nhật `CORS_ORIGINS` trên Render thành `<user-url>,<admin-url>`
-   (đã làm ở Bước 5.6 nếu làm đúng thứ tự, kiểm tra lại cho chắc).
-4. Đăng nhập lần đầu tại `<admin-url>` bằng email đúng `INITIAL_ADMIN_EMAIL` đã khai ở Bước 4 — hoặc
-   dùng `ADMIN_BOOTSTRAP_KEY` nếu cần tạo thêm admin thứ 2 (xem README.md).
-
-## Bước 7 — GitHub Actions (CI/CD)
-
-1. Repo → **Settings → Secrets and variables → Actions**.
-2. Tab **Secrets** → New repository secret: `RENDER_DEPLOY_HOOK_URL` = URL copy ở Bước 4.6.
-3. Tab **Variables** → New repository variable: `RENDER_URL` = `<backend-url>` (không có dấu `/`
-   cuối — [deploy.yml](../.github/workflows/deploy.yml) nối trực tiếp `${{ vars.RENDER_URL }}/health`).
-4. Xác nhận `ci.yml` đã chạy xanh trên `main` (không chỉ trên PR) — nếu chưa, push 1 commit vặt lên
-   `main` để kích hoạt.
-5. `deploy.yml` chỉ trigger thật từ lần chạy tiếp theo trên `main` sau khi file này tồn tại
-   (`workflow_run` không fire cho chính commit thêm nó) — chạy tay lần đầu qua **Actions → Deploy →
-   Run workflow** (`workflow_dispatch`) để xác nhận Deploy Hook hoạt động.
-
-## Bước 8 — Tắt keep-alive (chỉ sau khi Render đã lên Starter)
-
-1. **Actions → keep-alive.yml → ⋯ → Disable workflow**.
-2. Không xoá file — chỉ disable, phòng khi sau này hạ về free tier lại cần.
-
----
-
-## Sau bước 8
-
-Toàn bộ hạ tầng đã dựng xong. Tiếp theo là mục **"D-day — Nghiệm thu"** trong
-[../DEPLOYMENT.md](../DEPLOYMENT.md) — chạy checklist đó trước khi coi deploy hoàn tất, đặc biệt bài
-test reminder (hẹn 5 phút và ngồi đợi bắn thật) là bằng chứng duy nhất scheduler sống trên production.
-
-Gặp lỗi giữa chừng → tra bảng "Sự cố hay gặp" (mục 6, DEPLOYMENT.md) trước khi đoán mò.
-
-Sau demo, đừng quên mục **"Teardown"** (mục 4, DEPLOYMENT.md) — đây là phần hay bị quên nhất và là
-lý do bị trừ tiền tháng thứ 2.
+Alembic migrations, rate limiting, structured logging/monitoring, global exception handler, security
+headers — đã ghi nhận là nợ kỹ thuật ở [ROADMAP.md](../ROADMAP.md)/[ARCHITECTURE.md](../ARCHITECTURE.md),
+để lại cho phiên làm việc riêng sau khi deploy ổn định. Webhook `events.watch` thật cho Calendar
+(thay polling) có thể làm ngay sau khi có domain public HTTPS thật từ tài liệu này, nhưng là 1 thay
+đổi tách biệt.

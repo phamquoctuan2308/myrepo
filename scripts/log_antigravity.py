@@ -4,7 +4,8 @@ Antigravity IDE log scanner — extracts the exact user-typed prompts from
 local Antigravity conversation transcripts.
 
 Source of truth:
-    ~/.gemini/antigravity-ide/brain/<conv_id>/.system_generated/logs/transcript.jsonl
+    ~/.gemini/antigravity-ide/brain/<conv_id>/.system_generated/logs/overview.txt
+    (falling back to transcript.jsonl when overview.txt is unavailable)
     (with fallback to the legacy ~/.gemini/antigravity/brain/... layout)
 
 Each transcript line is a JSON object. We emit one log entry per line where

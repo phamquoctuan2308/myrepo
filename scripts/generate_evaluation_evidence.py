@@ -53,6 +53,12 @@ def fmt_percent(value: float | None) -> str:
     return "Pending" if value is None else f"{value * 100:.1f}%"
 
 
+def provider_model_label(provider: str, model: str) -> str:
+    if not provider:
+        return model
+    return model if model.startswith(f"{provider}/") else f"{provider}/{model}"
+
+
 def build_report() -> str:
     commit, dirty = source_revision()
     coverage = load_json("coverage-latest.json")
@@ -84,6 +90,8 @@ def build_report() -> str:
     acceptance_case_rate = acceptance.get("metrics", {}).get("case_pass_rate") if acceptance else None
     p95 = latency.get("metrics", {}).get("p95_ms") if latency else None
     feedback_rating = feedback.get("rating_mean") if feedback else None
+    acceptance_provider = acceptance.get("provider", "unknown") if acceptance else "unknown"
+    acceptance_model = acceptance.get("model", "unknown") if acceptance else "unknown"
 
     generated_at = datetime.now(UTC).isoformat()
     return f"""# Evaluation Evidence — Orbit
@@ -110,7 +118,7 @@ protocol exists but no current result artifact is available.
 ## 2. Current measured AI quality
 
 - Formal acceptance: `{acceptance.get("run_at", "unknown") if acceptance else "Pending"}` using
-  `{acceptance.get("provider", "unknown") if acceptance else "unknown"}/{acceptance.get("model", "unknown") if acceptance else "unknown"}`.
+  `{provider_model_label(acceptance_provider, acceptance_model)}`.
 - Task extraction: `{tasks.get("case_count", 0) if tasks else 0}` cases; title precision
   `{fmt_percent(tasks.get("title_precision") if tasks else None)}`, recall
   `{fmt_percent(tasks.get("title_recall") if tasks else None)}`, F1 `{fmt_percent(task_f1)}`.

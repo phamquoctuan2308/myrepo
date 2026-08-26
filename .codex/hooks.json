@@ -1,12 +1,14 @@
 {
-  "version": "1.0",
+  "description": "Record Codex prompt and stop events in the shared project AI log.",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "name": "log-prompt",
-            "command": "bash scripts/_pyrun.sh scripts/log_hook.py --tool=codex",
+            "type": "command",
+            "command": "bash -lc 'repo=$(git rev-parse --show-toplevel) && bash \"$repo/scripts/_pyrun.sh\" \"$repo/scripts/log_hook.py\" --tool=codex'",
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$repo = git rev-parse --show-toplevel; & (Join-Path $repo 'scripts/log_hook.ps1') -Tool codex\"",
             "timeout": 10
           }
         ]
@@ -17,7 +19,9 @@
         "hooks": [
           {
             "name": "log-stop",
-            "command": "bash scripts/_pyrun.sh scripts/log_hook.py --tool=codex",
+            "type": "command",
+            "command": "bash -lc 'repo=$(git rev-parse --show-toplevel) && bash \"$repo/scripts/_pyrun.sh\" \"$repo/scripts/log_hook.py\" --tool=codex'",
+            "commandWindows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"$repo = git rev-parse --show-toplevel; & (Join-Path $repo 'scripts/log_hook.ps1') -Tool codex\"",
             "timeout": 10
           }
         ]
