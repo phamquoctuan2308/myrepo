@@ -1,9 +1,9 @@
 from langchain_core.messages import AIMessage, HumanMessage
-from sqlalchemy import select
+from sqlalchemy import literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents import graph as agent_graph
-from src.db.models import AssistantThread
+from src.db.models import AgentThread, AssistantThread
 
 _TITLE_MAX = 60
 _PREVIEW_MAX = 80
@@ -15,9 +15,14 @@ def _truncate(text: str, limit: int) -> str:
     return collapsed if len(collapsed) <= limit else collapsed[:limit].rstrip() + "…"
 
 
-async def _get_own_thread(db: AsyncSession, thread_id: str) -> AssistantThread | None:
+async def _get_own_thread(db: AsyncSession, owner_id: str, thread_id: str) -> AssistantThread | None:
     return (
-        await db.execute(select(AssistantThread).where(AssistantThread.thread_id == thread_id))
+        await db.execute(
+            select(AssistantThread).where(
+                AssistantThread.owner_id == owner_id,
+                AssistantThread.thread_id == thread_id,
+            )
+        )
     ).scalar_one_or_none()
 
 
@@ -28,7 +33,7 @@ async def touch_new_or_existing(
     routes.py). Creates the row on a brand new thread_id, title fixed from the first message; an
     existing thread only gets its preview/updated_at refreshed, title never changes after creation
     (same spirit as a conversation's name)."""
-    existing = await _get_own_thread(db, thread_id)
+    existing = await _get_own_thread(db, owner_id, thread_id)
     if existing is None:
         db.add(
             AssistantThread(
@@ -43,39 +48,69 @@ async def touch_new_or_existing(
     await db.commit()
 
 
-async def touch_if_exists(db: AsyncSession, *, thread_id: str, ai_preview: str) -> None:
+async def touch_if_exists(db: AsyncSession, *, owner_id: str, thread_id: str, ai_preview: str) -> None:
     """Called after /chat/resume completes. Only updates a row that was already created by
     touch_new_or_existing - never creates one, so a resume for a conversation-embedded interrupt
     (e.g. AIPanel's "Suggest reminder") doesn't start showing up in the Assistant's own thread
     list."""
-    existing = await _get_own_thread(db, thread_id)
+    existing = await _get_own_thread(db, owner_id, thread_id)
     if existing is not None:
         existing.preview = _truncate(ai_preview, _PREVIEW_MAX)
         await db.commit()
 
 
-async def list_threads(db: AsyncSession, owner_id: str) -> list[AssistantThread]:
+async def list_threads(
+    db: AsyncSession, owner_id: str, workspace_id: str | None = None
+) -> list[AssistantThread]:
+    stmt = select(AssistantThread).where(AssistantThread.owner_id == owner_id)
+    if workspace_id is not None:
+        stmt = stmt.join(
+            AgentThread,
+            AgentThread.id
+            == AssistantThread.owner_id + literal(":") + AssistantThread.thread_id,
+        ).where(AgentThread.workspace_id == workspace_id)
     result = await db.execute(
-        select(AssistantThread)
-        .where(AssistantThread.owner_id == owner_id)
+        stmt
         .order_by(AssistantThread.updated_at.desc())
         .limit(_LIST_LIMIT)
     )
     return list(result.scalars())
 
 
-async def get_owned_thread(db: AsyncSession, owner_id: str, thread_id: str) -> AssistantThread | None:
-    thread = await _get_own_thread(db, thread_id)
-    return thread if thread is not None and thread.owner_id == owner_id else None
+async def get_owned_thread(
+    db: AsyncSession,
+    owner_id: str,
+    thread_id: str,
+    workspace_id: str | None = None,
+) -> AssistantThread | None:
+    if workspace_id is None:
+        return await _get_own_thread(db, owner_id, thread_id)
+    return (
+        await db.execute(
+            select(AssistantThread)
+            .join(
+                AgentThread,
+                AgentThread.id
+                == AssistantThread.owner_id + literal(":") + AssistantThread.thread_id,
+            )
+            .where(
+                AssistantThread.owner_id == owner_id,
+                AssistantThread.thread_id == thread_id,
+                AgentThread.workspace_id == workspace_id,
+            )
+        )
+    ).scalar_one_or_none()
 
 
-async def get_thread_messages(thread_id: str) -> list[dict]:
+async def get_thread_messages(owner_id: str, thread_id: str) -> list[dict]:
     """Read a thread's message history the officially-supported LangGraph way (aget_state), not by
     reaching into the checkpointer's own Postgres tables directly - see AssistantThread's docstring
     for why those tables can't be queried for this on their own anyway (no owner_id link).
     Tool-call-only AIMessages (empty content) and ToolMessages are dropped - only human/assistant
     text turns make sense to replay in the chat UI."""
-    snapshot = await agent_graph.agent.aget_state({"configurable": {"thread_id": thread_id}})
+    snapshot = await agent_graph.agent.aget_state(
+        {"configurable": {"thread_id": f"{owner_id}:{thread_id}"}}
+    )
     messages = (snapshot.values or {}).get("messages", []) if snapshot else []
     out: list[dict] = []
     for m in messages:

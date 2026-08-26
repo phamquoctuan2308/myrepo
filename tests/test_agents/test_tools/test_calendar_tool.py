@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -8,11 +8,18 @@ from langgraph.types import Command
 from src.agents import graph as agent_graph
 from src.services import calendar_service
 
-_USER_ID = "test-user-calendar-tool"
-
 
 def _config():
     return {"configurable": {"thread_id": str(uuid4())}}
+
+
+def _agent_input(message):
+    return {"messages": [HumanMessage(content=message)], "user_id": "user-1", "workspace_id": "workspace-1"}
+
+
+def _allow_calendar(monkeypatch):
+    monkeypatch.setattr(calendar_service, "authorize_calendar_access", AsyncMock())
+    monkeypatch.setattr(calendar_service, "broadcast_change", AsyncMock())
 
 
 def _script_tool_call(fake_llm_factory, tool_name: str, args: dict):
@@ -38,22 +45,16 @@ def _script_tool_call(fake_llm_factory, tool_name: str, args: dict):
     return llm
 
 
-def _mock_service(monkeypatch, fake_service):
-    async def _fake(user_id):
-        return fake_service
-
-    monkeypatch.setattr(calendar_service, "_service", _fake)
-
-
 @pytest.mark.asyncio
 async def test_create_calendar_event_interrupts_then_creates(monkeypatch, fake_llm_factory):
+    _allow_calendar(monkeypatch)
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {
         "id": "evt-abc",
         "htmlLink": "https://calendar.google.com/event?eid=abc",
     }
     fake_service.events.return_value.list.return_value.execute.return_value = {"items": []}
-    _mock_service(monkeypatch, fake_service)
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     llm = _script_tool_call(
         fake_llm_factory,
@@ -63,9 +64,7 @@ async def test_create_calendar_event_interrupts_then_creates(monkeypatch, fake_l
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    result = await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="schedule the review")], "user_id": _USER_ID}, config
-    )
+    result = await agent_graph.agent.ainvoke(_agent_input("schedule the review"), config)
 
     interrupts = result.get("__interrupt__")
     assert interrupts is not None
@@ -83,7 +82,7 @@ async def test_create_calendar_event_interrupts_then_creates(monkeypatch, fake_l
 async def test_create_calendar_event_declined(monkeypatch, fake_llm_factory):
     fake_service = MagicMock()
     fake_service.events.return_value.list.return_value.execute.return_value = {"items": []}
-    _mock_service(monkeypatch, fake_service)
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     llm = _script_tool_call(
         fake_llm_factory,
@@ -93,9 +92,7 @@ async def test_create_calendar_event_declined(monkeypatch, fake_llm_factory):
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="schedule the review")], "user_id": _USER_ID}, config
-    )
+    await agent_graph.agent.ainvoke(_agent_input("schedule the review"), config)
 
     result2 = await agent_graph.agent.ainvoke(Command(resume={"approved": False}), config)
     final = result2["messages"][-1]
@@ -104,34 +101,8 @@ async def test_create_calendar_event_declined(monkeypatch, fake_llm_factory):
 
 
 @pytest.mark.asyncio
-async def test_create_calendar_event_not_connected(monkeypatch, fake_llm_factory):
-    """No GoogleCalendarCredential row for this user - real (unmocked) credential-resolution path
-    should surface as a friendly tool message, not a crash. The conflict check now runs before the
-    confirmation interrupt, so a not-connected account fails fast in the very first turn - there's
-    no draft worth confirming if we already know saving it would fail, and no interrupt is left
-    pending to resume."""
-    llm = _script_tool_call(
-        fake_llm_factory,
-        "create_calendar_event",
-        {"summary": "Launch review", "start_iso": "2026-08-01T11:00:00", "end_iso": "2026-08-01T12:00:00"},
-    )
-    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
-
-    config = _config()
-    result = await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="schedule the review")], "user_id": "user-with-no-calendar"}, config
-    )
-
-    assert result.get("__interrupt__") is None
-    final = result["messages"][-1]
-    assert "hasn't connected Google Calendar" in final.content
-
-
-@pytest.mark.asyncio
 async def test_create_calendar_event_conflict_offers_alternatives(monkeypatch, fake_llm_factory):
-    """Propose & Verify: an overlapping event turns up in the draft's `conflicts`, and up to 2
-    free alternative slots are computed and attached - all before the user is ever asked to
-    confirm. Picking an alternative via `edits` creates the event at that time, not the original."""
+    _allow_calendar(monkeypatch)
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {
         "id": "evt-abc",
@@ -147,7 +118,7 @@ async def test_create_calendar_event_conflict_offers_alternatives(monkeypatch, f
             }
         ]
     }
-    _mock_service(monkeypatch, fake_service)
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     llm = _script_tool_call(
         fake_llm_factory,
@@ -157,28 +128,29 @@ async def test_create_calendar_event_conflict_offers_alternatives(monkeypatch, f
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    result = await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="schedule the review")], "user_id": _USER_ID}, config
-    )
+    result = await agent_graph.agent.ainvoke(_agent_input("schedule the review"), config)
 
     draft = result["__interrupt__"][0].value["draft"]
-    assert [c["title"] for c in draft["conflicts"]] == ["Standup"]
-    assert draft["alternatives"][0] == {"start": "2026-08-01T11:30:00", "end": "2026-08-01T12:30:00"}
+    assert [conflict["title"] for conflict in draft["conflicts"]] == ["Standup"]
+    assert draft["alternatives"][0] == {
+        "start": "2026-08-01T11:30:00",
+        "end": "2026-08-01T12:30:00",
+    }
     assert len(draft["alternatives"]) == 2
 
-    alt = draft["alternatives"][0]
+    alternative = draft["alternatives"][0]
     result2 = await agent_graph.agent.ainvoke(
-        Command(resume={"approved": True, "edits": {"start": alt["start"], "end": alt["end"]}}), config
+        Command(resume={"approved": True, "edits": {"start": alternative["start"], "end": alternative["end"]}}),
+        config,
     )
     assert "Event created" in result2["messages"][-1].content
     body = fake_service.events.return_value.insert.call_args.kwargs["body"]
-    assert body["start"]["dateTime"] == alt["start"]
+    assert body["start"]["dateTime"] == alternative["start"]
 
 
 @pytest.mark.asyncio
-async def test_create_calendar_event_conflict_confirmed_anyway(monkeypatch, fake_llm_factory):
-    """Alternatives are offers, not a block - confirming without picking one still books the
-    originally requested (conflicting) time, same as today's double-booking-allowed behavior."""
+async def test_create_calendar_event_conflict_can_be_confirmed_anyway(monkeypatch, fake_llm_factory):
+    _allow_calendar(monkeypatch)
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {
         "id": "evt-abc",
@@ -194,7 +166,7 @@ async def test_create_calendar_event_conflict_confirmed_anyway(monkeypatch, fake
             }
         ]
     }
-    _mock_service(monkeypatch, fake_service)
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     llm = _script_tool_call(
         fake_llm_factory,
@@ -204,23 +176,22 @@ async def test_create_calendar_event_conflict_confirmed_anyway(monkeypatch, fake
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="schedule the review")], "user_id": _USER_ID}, config
-    )
+    await agent_graph.agent.ainvoke(_agent_input("schedule the review"), config)
 
-    result2 = await agent_graph.agent.ainvoke(Command(resume={"approved": True}), config)
-    assert "Event created" in result2["messages"][-1].content
+    result = await agent_graph.agent.ainvoke(Command(resume={"approved": True}), config)
+    assert "Event created" in result["messages"][-1].content
     body = fake_service.events.return_value.insert.call_args.kwargs["body"]
     assert body["start"]["dateTime"] == "2026-08-01T11:00:00"
 
 
 @pytest.mark.asyncio
 async def test_update_calendar_event_interrupts_then_updates(monkeypatch, fake_llm_factory):
+    _allow_calendar(monkeypatch)
     fake_service = MagicMock()
     fake_service.events.return_value.patch.return_value.execute.return_value = {
         "id": "evt-1", "summary": "Launch review (moved)", "htmlLink": "https://calendar.google.com/event?eid=evt1",
     }
-    _mock_service(monkeypatch, fake_service)
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     llm = _script_tool_call(
         fake_llm_factory, "update_calendar_event", {"event_id": "evt-1", "start_iso": "2026-08-01T15:00:00"}
@@ -228,9 +199,7 @@ async def test_update_calendar_event_interrupts_then_updates(monkeypatch, fake_l
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    result = await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="move the review")], "user_id": _USER_ID}, config
-    )
+    result = await agent_graph.agent.ainvoke(_agent_input("move the review"), config)
 
     interrupts = result.get("__interrupt__")
     assert interrupts is not None
@@ -245,17 +214,16 @@ async def test_update_calendar_event_interrupts_then_updates(monkeypatch, fake_l
 
 @pytest.mark.asyncio
 async def test_delete_calendar_event_interrupts_then_deletes(monkeypatch, fake_llm_factory):
+    _allow_calendar(monkeypatch)
     fake_service = MagicMock()
     fake_service.events.return_value.delete.return_value.execute.return_value = {}
-    _mock_service(monkeypatch, fake_service)
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     llm = _script_tool_call(fake_llm_factory, "delete_calendar_event", {"event_id": "evt-1"})
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    result = await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="cancel the review")], "user_id": _USER_ID}, config
-    )
+    result = await agent_graph.agent.ainvoke(_agent_input("cancel the review"), config)
 
     interrupts = result.get("__interrupt__")
     assert interrupts is not None
@@ -271,15 +239,13 @@ async def test_delete_calendar_event_interrupts_then_deletes(monkeypatch, fake_l
 @pytest.mark.asyncio
 async def test_delete_calendar_event_declined(monkeypatch, fake_llm_factory):
     fake_service = MagicMock()
-    _mock_service(monkeypatch, fake_service)
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     llm = _script_tool_call(fake_llm_factory, "delete_calendar_event", {"event_id": "evt-1"})
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
     config = _config()
-    await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="cancel the review")], "user_id": _USER_ID}, config
-    )
+    await agent_graph.agent.ainvoke(_agent_input("cancel the review"), config)
 
     result2 = await agent_graph.agent.ainvoke(Command(resume={"approved": False}), config)
     final = result2["messages"][-1]
@@ -297,7 +263,7 @@ async def test_list_calendar_events_with_scope_resolves_deterministic_range(monk
     fake_service.events.return_value.list.return_value.execute.return_value = {
         "items": [{"id": "evt-1", "summary": "Standup", "start": {"dateTime": "2026-08-11T09:00:00"}}]
     }
-    _mock_service(monkeypatch, fake_service)
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
     monkeypatch.setattr(
         calendar_service, "resolve_scope",
         lambda scope: ("2026-08-10T00:00:00+07:00", "2026-08-17T00:00:00+07:00"),
@@ -306,9 +272,7 @@ async def test_list_calendar_events_with_scope_resolves_deterministic_range(monk
     llm = _script_tool_call(fake_llm_factory, "list_calendar_events", {"scope": "this_week"})
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
-    result = await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="tuần này tôi có gì")], "user_id": _USER_ID}, _config()
-    )
+    result = await agent_graph.agent.ainvoke(_agent_input("tuần này tôi có gì"), _config())
 
     kwargs = fake_service.events.return_value.list.call_args.kwargs
     assert kwargs["timeMin"] == "2026-08-10T00:00:00+07:00"
@@ -320,7 +284,7 @@ async def test_list_calendar_events_with_scope_resolves_deterministic_range(monk
 async def test_list_calendar_events_with_explicit_range_still_works(monkeypatch, fake_llm_factory):
     fake_service = MagicMock()
     fake_service.events.return_value.list.return_value.execute.return_value = {"items": []}
-    _mock_service(monkeypatch, fake_service)
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     llm = _script_tool_call(
         fake_llm_factory, "list_calendar_events",
@@ -328,9 +292,7 @@ async def test_list_calendar_events_with_explicit_range_still_works(monkeypatch,
     )
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
-    result = await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="events tomorrow")], "user_id": _USER_ID}, _config()
-    )
+    result = await agent_graph.agent.ainvoke(_agent_input("events tomorrow"), _config())
 
     kwargs = fake_service.events.return_value.list.call_args.kwargs
     assert kwargs["timeMin"] == "2026-08-01T00:00:00"
@@ -341,14 +303,12 @@ async def test_list_calendar_events_with_explicit_range_still_works(monkeypatch,
 @pytest.mark.asyncio
 async def test_list_calendar_events_without_scope_or_range_asks_for_one(monkeypatch, fake_llm_factory):
     fake_service = MagicMock()
-    _mock_service(monkeypatch, fake_service)
+    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     llm = _script_tool_call(fake_llm_factory, "list_calendar_events", {})
     monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
 
-    result = await agent_graph.agent.ainvoke(
-        {"messages": [HumanMessage(content="list my events")], "user_id": _USER_ID}, _config()
-    )
+    result = await agent_graph.agent.ainvoke(_agent_input("list my events"), _config())
 
     fake_service.events.return_value.list.assert_not_called()
     assert "khoảng thời gian" in result["messages"][-1].content

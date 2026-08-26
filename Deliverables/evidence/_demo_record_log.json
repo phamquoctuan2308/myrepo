@@ -1,0 +1,20 @@
+{
+  "steps": [
+    "Go to login page",
+    "Sign in",
+    "Chat page loaded",
+    "Open conversation with Quynh",
+    "Type and send a commitment message",
+    "Show AI panel / permission card",
+    "Click Summarize quick action",
+    "Summarize result rendered",
+    "Ask Orbit for a reminder",
+    "Confirm dialog appeared (human-in-the-loop)",
+    "Clicked Xac nhan",
+    "Go to Task Inbox",
+    "Accept a suggested task",
+    "Go to Calendar page",
+    "Done"
+  ],
+  "video": "Deliverables\\evidence\\orbit_real_demo.webm"
+}

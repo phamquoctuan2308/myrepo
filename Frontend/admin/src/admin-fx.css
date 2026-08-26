@@ -1,0 +1,228 @@
+/* Orbit admin dark theme - brings Frontend/admin visually in line with the dark theme already
+   shipped on Frontend/user (see Frontend/user/src/orbit-fx.css). Two separate Vite apps with
+   independent builds, so this is a standalone file, not a shared import - never touches
+   Frontend/shared/styles.css (also used by Frontend/user) or admin.css/workspace-admin.css
+   directly; it layers on top via higher-specificity/later-loaded overrides instead.
+
+   Scoping rule, same as orbit-fx.css: every rule is scoped under `.admin-shell`. AdminLayout.jsx
+   renders it as the main dashboard's root wrapper; AdminLoginPage.jsx/AccessDeniedPage.jsx render
+   *outside* that layout (their own `.admin-login-page`/`.admin-auth-state` root) but now also
+   carry `.admin-shell` directly on that same root so the "Auth (Login/Access denied)" section
+   below activates for them too - matching orbit-fx.css doing the same for Login/Register on the
+   user app. `.admin-shell` itself (admin.css) already sets `background:var(--admin-bg);
+   color:var(--admin-ink)`, and this file redeclares those two custom properties on the same
+   selector, so any element carrying the class picks up the dark values automatically - only the
+   auth-page-specific classes below need their own explicit overrides.
+
+   No GSAP/Framer effects layer here (unlike orbit-fx.css's components/fx/) - those are tied to
+   the user app's chat/AI surfaces and don't fit an admin data-table shell. This file is palette +
+   surface treatment only. */
+
+.admin-shell {
+  --admin-bg: #0a0e1a;
+  --admin-panel: #10162a;
+  --admin-panel-2: #141b34;
+  --admin-line: rgba(139, 124, 246, 0.18);
+  --admin-line-strong: rgba(139, 124, 246, 0.32);
+  --admin-ink: #e7e9f7;
+  --admin-muted: #9aa3c7;
+  --admin-primary: #526ff5;
+  --admin-primary-dark: #435dc9;
+  --admin-glow-a: #526ff5;
+  --admin-glow-b: #8b5cf6;
+  --admin-shadow: 0 10px 40px rgba(5, 8, 20, 0.45);
+}
+
+/* Contrast safety net: Frontend/shared/styles.css sets a hardcoded `h1,h2,h3,h4{color:var(--ink)}`
+   (its own light-only --ink, no dark counterpart) - an explicit color on the element itself always
+   wins over inherited `.admin-shell{color:var(--admin-ink)}` regardless of specificity, so any
+   heading here that isn't individually overridden below stays dark-on-dark. Catch every heading
+   once here (same fix orbit-fx.css already applies for Frontend/user, see its own "Contrast safety
+   net" comment) instead of only patching contexts noticed by testing. */
+.admin-shell h1, .admin-shell h2, .admin-shell h3, .admin-shell h4, .admin-shell h5, .admin-shell h6 { color: var(--admin-ink); }
+
+/* Same gap as the heading one above: Frontend/shared/styles.css's `input:-webkit-autofill` fix
+   uses `var(--card)` (that file's own hardcoded white, no dark counterpart) to repaint what Chrome
+   paints over an autofilled field - correct on every light page, but still paints white here now
+   that Admin Login/Access-denied are dark. Re-declare with this file's own dark tokens so the
+   higher-specificity `.admin-shell` version wins (mirrors `.orbit-fx input:-webkit-autofill` in
+   Frontend/user/src/orbit-fx.css). */
+.admin-shell input:-webkit-autofill,
+.admin-shell input:-webkit-autofill:hover,
+.admin-shell input:-webkit-autofill:focus,
+.admin-shell input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--admin-panel-2) inset;
+  -webkit-text-fill-color: var(--admin-ink);
+  caret-color: var(--admin-ink);
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* ---------- Sidebar - already dark in the base styles.css, just re-tinted to match the same
+   navy/violet-glow palette instead of its own separate near-black. ---------- */
+.admin-shell .admin-sidebar { background: var(--admin-panel); box-shadow: 4px 0 18px rgba(5, 8, 20, .35); }
+.admin-shell .admin-brand { border-bottom-color: var(--admin-line); }
+.admin-shell .admin-nav-link:hover { background: var(--admin-panel-2); }
+.admin-shell .admin-nav-link.active { background: linear-gradient(90deg, rgba(82, 111, 245, .28), rgba(139, 124, 246, .14)); }
+.admin-shell .admin-user-app-link { background: rgba(255, 255, 255, .04); border-color: var(--admin-line); }
+.admin-shell .admin-user-app-link:hover { background: var(--admin-panel-2); }
+.admin-shell .admin-profile { border-top-color: var(--admin-line); }
+
+/* ---------- Top bar ---------- */
+.admin-shell .admin-topbar { background: rgba(16, 22, 42, .72); backdrop-filter: blur(14px); border-bottom-color: var(--admin-line); }
+.admin-shell .admin-search, .admin-shell .admin-filter-search { background: var(--admin-panel-2); border-color: var(--admin-line); color: var(--admin-muted); }
+.admin-shell .admin-search input, .admin-shell .admin-filter-search input { color: var(--admin-ink); }
+.admin-shell .admin-icon-button { color: var(--admin-muted); }
+.admin-shell .admin-icon-button:hover { background: var(--admin-panel-2); color: var(--admin-ink); }
+.admin-shell .admin-system-pill { background: rgba(46, 230, 166, .1); border-color: rgba(46, 230, 166, .28); color: #6be9c3; }
+
+/* ---------- Page heading + generic panels ---------- */
+.admin-shell .admin-page-header h1 { color: var(--admin-ink); }
+.admin-shell .admin-page-header p { color: var(--admin-muted); }
+.admin-shell .admin-card,
+.admin-shell .admin-metric-card,
+.admin-shell .admin-summary-strip,
+.admin-shell .admin-usage-metrics article,
+.admin-shell .admin-monitor-card,
+.admin-shell .admin-model-option,
+.admin-shell .admin-usage-preview,
+.admin-shell .admin-workspace-create {
+  background: var(--admin-panel-2); border-color: var(--admin-line); color: var(--admin-ink);
+  box-shadow: var(--admin-shadow);
+}
+.admin-shell .admin-metric-card:hover { box-shadow: 0 14px 30px rgba(5, 8, 20, .5); }
+.admin-shell .admin-metric-copy > span { color: var(--admin-muted); }
+.admin-shell .admin-metric-copy > strong { color: var(--admin-ink); }
+.admin-shell .admin-card-head { border-bottom-color: var(--admin-line); }
+.admin-shell .admin-card-head h2, .admin-shell .admin-table-title h2, .admin-shell .admin-ai-master h2,
+.admin-shell .admin-section-heading h2, .admin-shell .admin-section-heading > div strong,
+.admin-shell .admin-table-toolbar > div > strong {
+  color: var(--admin-ink);
+}
+.admin-shell .admin-card-head p, .admin-shell .admin-table-title p, .admin-shell .admin-ai-master p,
+.admin-shell .admin-section-heading p, .admin-shell .admin-section-heading > div small,
+.admin-shell .admin-table-toolbar > div > small, .admin-shell .admin-monitor-card > p {
+  color: var(--admin-muted);
+}
+.admin-shell .admin-summary-strip > div { border-right-color: var(--admin-line); }
+
+/* ---------- Chart (SimpleChart.jsx renders raw SVG with hardcoded light-theme colors as
+   presentation attributes - a stylesheet rule beats those regardless of specificity). ---------- */
+.admin-shell .admin-chart-axis { color: #6c76a0; }
+.admin-shell .admin-chart line { stroke: rgba(255, 255, 255, .06); }
+.admin-shell .admin-donut:after { background: var(--admin-panel-2); }
+.admin-shell .admin-donut span { color: var(--admin-muted); }
+.admin-shell .admin-model-legend em { color: var(--admin-muted); }
+.admin-shell .admin-chart-total span { color: #6be9c3; }
+
+/* ---------- Activity / health lists ---------- */
+.admin-shell .admin-activity-row { border-bottom-color: var(--admin-line); }
+.admin-shell .admin-activity-icon { background: rgba(82, 111, 245, .16); color: #a7b6ff; }
+.admin-shell .admin-activity-row div span { color: var(--admin-muted); }
+.admin-shell .admin-activity-row time { color: #6c76a0; }
+.admin-shell .admin-health-score { background: linear-gradient(135deg, rgba(46, 230, 166, .12), rgba(82, 111, 245, .08)); }
+.admin-shell .admin-health-score span { color: var(--admin-muted); }
+.admin-shell .admin-health-row, .admin-shell .admin-health-list > div,
+.admin-shell .admin-model-list > div, .admin-shell .admin-summary > div {
+  border-top-color: var(--admin-line); border-bottom-color: var(--admin-line);
+}
+.admin-shell .admin-health-row small, .admin-shell .admin-health-list small,
+.admin-shell .admin-model-list small, .admin-shell .admin-summary dt {
+  color: var(--admin-muted);
+}
+.admin-shell .admin-status { background: rgba(46, 230, 166, .12); color: #6be9c3; }
+.admin-shell .admin-status.failed, .admin-shell .admin-status.locked,
+.admin-shell .admin-status.down, .admin-shell .admin-status.inactive {
+  background: rgba(239, 86, 117, .14); color: #ff8fa3;
+}
+.admin-shell .admin-live { background: rgba(46, 230, 166, .12); color: #6be9c3; }
+
+/* ---------- Tables (both the custom .admin-table and bare Bootstrap .table used directly in a
+   few sub-tables) ---------- */
+.admin-shell .admin-table-toolbar, .admin-shell .admin-audit-toolbar { border-bottom-color: var(--admin-line); }
+.admin-shell .admin-table th, .admin-shell .admin-audit-table th,
+.admin-shell table.table thead th {
+  background: var(--admin-panel); color: var(--admin-muted); border-bottom-color: var(--admin-line);
+}
+.admin-shell .admin-table td, .admin-shell .admin-audit-table td,
+.admin-shell table.table td {
+  color: var(--admin-ink); border-bottom-color: var(--admin-line);
+}
+.admin-shell .admin-table tbody tr:hover, .admin-shell table.table tbody tr:hover { background: var(--admin-panel); }
+.admin-shell .admin-user-cell strong, .admin-shell .admin-table td > strong { color: var(--admin-ink); }
+.admin-shell .admin-user-cell small, .admin-shell .admin-table td > small,
+.admin-shell .admin-audit-table td small { color: var(--admin-muted); }
+.admin-shell .admin-table code, .admin-shell .admin-audit-table code {
+  background: var(--admin-panel); color: #c9d1ff;
+}
+.admin-shell .admin-row-action { color: var(--admin-muted); }
+.admin-shell .admin-row-action:hover { background: rgba(239, 86, 117, .14); color: #ff8fa3; }
+.admin-shell .admin-row-action.unlock:hover { background: rgba(46, 230, 166, .14); color: #6be9c3; }
+.admin-shell .admin-empty { color: var(--admin-muted); }
+.admin-shell .admin-empty strong { color: var(--admin-ink); }
+
+/* ---------- Forms - both the custom admin-* inputs and bare Bootstrap form-control/form-select
+   used directly (e.g. the Audit log search/filter toolbar). ---------- */
+.admin-shell .admin-number-input, .admin-shell .admin-workspace-form input,
+.admin-shell .admin-workspace-form select, .admin-shell .admin-inline-select,
+.admin-shell .admin-model-form input[type="text"], .admin-shell .form-control, .admin-shell .form-select {
+  background: var(--admin-panel); border-color: var(--admin-line); color: var(--admin-ink);
+}
+.admin-shell .admin-number-input span { background: var(--admin-panel-2); border-left-color: var(--admin-line); color: var(--admin-muted); }
+.admin-shell .form-control:focus, .admin-shell .form-select:focus,
+.admin-shell .admin-workspace-form input:focus, .admin-shell .admin-workspace-form select:focus,
+.admin-shell .admin-inline-select:focus {
+  border-color: var(--admin-glow-a); box-shadow: 0 0 0 3px rgba(82, 111, 245, .18);
+}
+.admin-shell .admin-workspace-form label, .admin-shell .admin-model-form label { color: var(--admin-muted); }
+.admin-shell .admin-presets button { background: var(--admin-panel); border-color: var(--admin-line); color: var(--admin-muted); }
+.admin-shell .admin-presets button.active { border-color: var(--admin-glow-a); color: #c9d1ff; background: rgba(82, 111, 245, .14); }
+
+/* ---------- Buttons, dropdowns, modals - Bootstrap primitives used directly across admin pages
+   (Support forms and row-action menus) ---------- */
+.admin-shell .admin-secondary-button, .admin-shell .btn-light { background: var(--admin-panel-2); border-color: var(--admin-line); color: var(--admin-ink); }
+.admin-shell .admin-secondary-button:hover, .admin-shell .btn-light:hover { background: var(--admin-panel); }
+.admin-shell .dropdown-menu { background: var(--admin-panel-2); border-color: var(--admin-line); box-shadow: var(--admin-shadow); }
+.admin-shell .dropdown-item { color: var(--admin-ink); }
+.admin-shell .dropdown-item:hover, .admin-shell .dropdown-item:focus { background: var(--admin-panel); color: var(--admin-ink); }
+.admin-shell .modal-content { background: var(--admin-panel-2); border: 1px solid var(--admin-line); color: var(--admin-ink); }
+.admin-shell .modal-header, .admin-shell .modal-footer { border-color: var(--admin-line); }
+.admin-shell .btn-close { filter: invert(1) grayscale(1) brightness(1.8); }
+.admin-shell .text-muted, .admin-shell .text-secondary { color: var(--admin-muted) !important; }
+
+/* ---------- AI management / usage settings ---------- */
+.admin-shell .admin-warning-banner, .admin-shell .admin-notice {
+  background: rgba(233, 162, 59, .12); border-color: rgba(233, 162, 59, .32); color: #f0be7c;
+}
+.admin-shell .admin-notice.error { background: rgba(239, 86, 117, .14); border-color: rgba(239, 86, 117, .32); color: #ff8fa3; }
+.admin-shell .admin-audit-notice {
+  background: linear-gradient(90deg, rgba(82, 111, 245, .14), rgba(139, 124, 246, .08));
+  border-color: var(--admin-line); color: #c9d1ff;
+}
+.admin-shell .admin-audit-notice strong { color: var(--admin-ink); }
+.admin-shell .admin-audit-notice div span { color: var(--admin-muted); }
+.admin-shell .admin-section-heading > span { background: rgba(82, 111, 245, .16); color: #a7b6ff; }
+.admin-shell .admin-provider-logo { background: rgba(82, 111, 245, .16); color: #a7b6ff; }
+.admin-shell .admin-radio { border-color: var(--admin-line); }
+.admin-shell .admin-model-option.selected { border-color: var(--admin-glow-a); box-shadow: 0 0 0 3px rgba(82, 111, 245, .18); }
+.admin-shell .admin-model-option:hover { border-color: var(--admin-line-strong); }
+.admin-shell .admin-model-option h3 { color: var(--admin-ink); }
+.admin-shell .admin-model-option > small { color: var(--admin-muted); }
+.admin-shell .admin-usage-bar, .admin-shell .admin-usage-chart > div > i { background: var(--admin-panel); }
+
+/* ---------- Auth (Login/Access denied) - see this file's header comment for why these carry
+   .admin-shell directly instead of inheriting it from AdminLayout. ---------- */
+.admin-shell.admin-login-page, .admin-shell.admin-auth-state { background: var(--admin-bg); }
+.admin-shell .admin-login-card { background: var(--admin-panel-2); border-color: var(--admin-line); box-shadow: var(--admin-shadow); }
+.admin-shell .admin-login-brand small { color: var(--admin-muted); }
+.admin-shell .admin-login-heading p { color: var(--admin-muted); }
+.admin-shell .admin-login-card form > label { color: var(--admin-muted); }
+.admin-shell .admin-login-input { border-color: var(--admin-line); color: var(--admin-muted); }
+.admin-shell .admin-login-input:focus-within { border-color: var(--admin-glow-a); box-shadow: 0 0 0 3px rgba(82, 111, 245, .18); }
+.admin-shell .admin-login-input input { background: transparent; color: var(--admin-ink); }
+.admin-shell .admin-login-note { color: var(--admin-muted); }
+.admin-shell .admin-inline-alert { background: rgba(239, 86, 117, .14); border-color: rgba(239, 86, 117, .32); color: #ff8fa3; }
+.admin-shell .admin-auth-state.denied p { color: var(--admin-muted); }
+
+@media (max-width: 760px) {
+  .admin-shell .admin-backdrop.show { background: rgba(5, 8, 20, .55); }
+}

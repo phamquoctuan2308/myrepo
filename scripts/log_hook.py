@@ -5,9 +5,9 @@ Reads JSON from stdin, normalizes to common format, appends to .ai-log/session.j
 """
 import json
 import os
-import sys
 import subprocess
-from datetime import datetime, timezone, timedelta
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 VN_TZ = timezone(timedelta(hours=7))
@@ -145,11 +145,11 @@ def normalize(data: dict, tool: str) -> dict | None:
     # this only checked `prompt`, which dropped Claude Bash/Edit events (their
     # tool_input has `command` / `file_path`, not `prompt` or `content`) and
     # any Gemini/Cursor/Copilot turn that carried context but no plain prompt.
-    _PAYLOAD_KEYS = ("prompt", "tool_input", "response_summary",
-                     "tool_response", "tool_args", "files_context")
-    _LIFECYCLE_EVENTS = ("Stop", "stop", "SessionEnd", "sessionEnd", "AfterModel")
-    has_payload = any(base.get(k) for k in _PAYLOAD_KEYS)
-    if not has_payload and event not in _LIFECYCLE_EVENTS:
+    payload_keys = ("prompt", "tool_input", "response_summary",
+                    "tool_response", "tool_args", "files_context")
+    lifecycle_events = ("Stop", "stop", "SessionEnd", "sessionEnd", "AfterModel")
+    has_payload = any(base.get(k) for k in payload_keys)
+    if not has_payload and event not in lifecycle_events:
         return None
 
     return base
@@ -173,15 +173,24 @@ def main():
     if not entry:
         sys.exit(0)
 
-    log_dir = Path(os.environ.get("AI_LOG_DIR", ".ai-log"))
+    configured_log_dir = os.environ.get("AI_LOG_DIR")
+    if configured_log_dir:
+        log_dir = Path(configured_log_dir)
+    else:
+        # Codex runs hooks with the session cwd. A session may start in a
+        # nested directory (for example Frontend/), but the shared AI log is
+        # repository-scoped and must always live at the repository root.
+        repo_root = git("git rev-parse --show-toplevel")
+        log_dir = Path(repo_root) / ".ai-log" if repo_root else Path(".ai-log")
     log_dir.mkdir(exist_ok=True)
     log_file = log_dir / "session.jsonl"
 
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Output valid JSON (required by some tools like Gemini)
-    print(json.dumps({"status": "logged"}))
+    # Codex command hooks expect a JSON control object on stdout. Other tools
+    # only require valid JSON and safely ignore this permissive field.
+    print(json.dumps({"continue": True}))
 
 
 if __name__ == "__main__":

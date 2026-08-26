@@ -1,281 +1,369 @@
-# Architecture Document
+# Kiến trúc hệ thống Orbit
 
-## System Overview
+> Tài liệu kỹ thuật “as implemented”, đối chiếu trực tiếp với code ngày 15/08/2026. Tài liệu này mô
+> tả boundary, runtime, dữ liệu và rủi ro; [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) là bản nhập môn.
 
-Orbit là AI agent nhúng trong ứng dụng chat: FastAPI + LangGraph ở backend, React + Vite ở
-frontend, **PostgreSQL** làm database duy nhất (không còn hỗ trợ SQLite, xem mục Database). Backend
-có auth thật (JWT + bcrypt), nhắn tin 1-1/nhóm realtime qua WebSocket, phân
-quyền role user/admin, và agent LangGraph (LLM: Google Gemini, Groq, hoặc OpenAI, đổi qua `.env`)
-với các tool có human-in-the-loop (calendar, reminder) cùng tool tóm tắt/trích xuất task/tìm kiếm
-tin cũ. Toàn bộ tính
-năng người dùng (Tasks, Calendar, Reminders, Memory, Profile, AI Assistant, Admin) đã nối API thật
-— không còn trang nào dùng mock data.
+## 1. Mục tiêu và nguyên tắc kiến trúc
 
-## Architecture Diagram
+Orbit là một **modular monolith** có realtime và AI agent. Kiến trúc hiện tại ưu tiên:
 
-```mermaid
-graph TB
-    subgraph Frontend["Frontend (React + Vite)"]
-        UI[Pages / Components]
-        WSClient[WebSocket client]
-    end
+- một backend async dùng chung cho REST, WebSocket, agent và background jobs;
+- PostgreSQL làm nguồn dữ liệu bền vững duy nhất ở runtime;
+- xác thực danh tính tách khỏi authorization theo resource;
+- yêu cầu người dùng xác nhận trước mọi agent tool có tác dụng phụ;
+- cô lập dữ liệu theo user/participant, không cấp admin quyền đọc chat mặc định;
+- hỗ trợ thay LLM provider mà không thay luồng agent.
 
-    subgraph Backend["Backend (FastAPI)"]
-        AuthAPI["/api/v1/auth"]
-        ChatAPI["/api/v1/conversations, /messages"]
-        AdminAPI["/api/v1/admin"]
-        AgentAPI["/api/v1/chat, /chat/resume"]
-        DataAPI["/api/v1/tasks, /calendar, /reminders, /memories"]
-        WS["/api/v1/ws"]
-        Agent[LangGraph Agent]
-        LLM[LLM Service - get_llm]
-        Tools[Agent Tools]
-        Scheduler["APScheduler - reminders + calendar poll"]
-        Proactive[proactive_service]
-    end
-
-    subgraph Data["Data Layer"]
-        DB[(PostgreSQL)]
-        Google[Google Calendar API]
-        LLMProvider[Gemini / Groq]
-    end
-
-    UI -->|HTTP/REST| AuthAPI
-    UI -->|HTTP/REST| ChatAPI
-    UI -->|HTTP/REST| AdminAPI
-    UI -->|HTTP/REST| AgentAPI
-    UI -->|HTTP/REST| DataAPI
-    WSClient <-->|WebSocket| WS
-    AgentAPI --> Agent
-    Agent -.->|checkpoint per thread_id| DB
-    Agent --> LLM
-    Agent --> Tools
-    LLM --> LLMProvider
-    Tools --> Google
-    Tools --> DB
-    ChatAPI -->|new message| Proactive
-    WS -->|new message| Proactive
-    Proactive --> LLM
-    Proactive -->|task gợi ý| DB
-    Scheduler -->|poll changes| Google
-    Scheduler -->|fire reminder| DB
-    Scheduler -.->|broadcast| WS
-    AuthAPI --> DB
-    ChatAPI --> DB
-    AdminAPI --> DB
-    DataAPI --> DB
-    WS --> DB
-```
-
-## Components
-
-### 1. Frontend (React + Vite)
-- **Purpose:** SPA cho toàn bộ trải nghiệm người dùng — auth, chat realtime, AI assistant, quản lý
-  cá nhân (task/lịch/nhắc việc/memory/hồ sơ), admin.
-- **Trang chính** (`Frontend/src/pages/`): `LoginPage`/`RegisterPage`, `ChatPage`, `TaskPage`,
-  `CalendarPage`, `ReminderPage`, `MemoryPage`, `ProfilePage`, `PersonalAssistantPage` (`/assistant`
-  — chat trực tiếp với agent, có nút Xác nhận/Huỷ khi agent cần human-in-the-loop), và 4 trang admin
-  (`admin/AdminDashboardPage`, `AdminUsersPage`, `AdminConversationsPage`, `AdminUserDataPage` —
-  quản lý Task/Reminder/Memory toàn hệ thống). Tất cả gọi API thật qua `Frontend/src/api/`, không
-  còn trang nào dùng `Frontend/src/data/mockData.js`.
-- **Panel AI trong chat** (`AIPanel.jsx`): Summarize, Extract tasks, Find schedule, Deadlines,
-  Suggest reminder (có nút Xác nhận/Huỷ ngay trong panel), và ô tự do "Ask Orbit".
-- **State Management:** React Context (`AuthContext` cho JWT/user hiện tại) + hook riêng theo tính
-  năng (`useConversations`, `useMessages`), kênh WebSocket dùng chung qua `AppLayout.jsx` (Outlet
-  context `subscribe`/`sendJson`) thay vì mỗi trang tự mở kết nối riêng.
-
-### 2. Backend (FastAPI)
-- **Purpose:** REST API + WebSocket cho auth, nhắn tin, quản trị, dữ liệu cá nhân, và cổng vào AI
-  agent.
-- **API Design:** RESTful, mounted dưới `/api/v1` — `auth_routes.py`, `chat_routes.py`,
-  `admin_routes.py`, `routes.py` (agent chat), `task_routes.py`, `calendar_routes.py`,
-  `reminder_routes.py`, `memory_routes.py`. Route mỏng — business logic nằm ở `src/services/`.
-- **Authentication:** JWT (PyJWT), password hash bcrypt (`src/auth/`). `get_current_user` +
-  `require_admin` dependency cho phân quyền 2 role (`user`/`admin`). `/api/v1/chat` verify thêm
-  người gọi có phải participant của `conversation_id` (nếu có truyền) trước khi cho agent xử lý.
-  Ngoài email/mật khẩu, `POST /auth/google` (`src/auth/google_oauth.py`) cho đăng nhập bằng Google —
-  xác minh chữ ký ID token (GIS, không cần client secret, không có route callback), find-or-create
-  qua bảng `google_identities` riêng (FK tới `users`, không ALTER bảng `users` sẵn có); JWT trả về
-  tạo bởi đúng `create_access_token` dùng chung với flow mật khẩu — cấu trúc token không đổi.
-
-### 3. AI Agent (LangGraph)
-- **Agent Type:** Plan-and-execute dạng đơn giản — 1 node `planner` (LLM bound tools) ⇄ 1 node
-  `tools` (`ToolNode`), lặp tới khi planner trả lời không kèm tool call. Tool không cần xác nhận
-  (`summarize_conversation`, `extract_tasks`) dừng ngay sau khi chạy — dùng thẳng output làm câu trả
-  lời, không gọi LLM lần 2 để "relay" lại (từng gây lỗi 400 do model tự hallucinate cú pháp tool call).
-- **State:** `AgentState` (TypedDict, `total=False`) — `messages` (reducer `add_messages`),
-  `context`, `summary`, `error`, `user_id`, `conversation_id` (chỉ set từ `routes.py`, không bao giờ
-  do LLM cung cấp — cho tool cần biết đang ở hội thoại nào mà không thể bị "spoof"), ...
-  (`src/agents/state.py`).
-- **Nodes:** `planner_node` (`src/agents/nodes/planner_node.py`) — bind `ALL_TOOLS`, inject ngày
-  giờ hiện tại theo `calendar_timezone` vào system prompt (tránh agent đoán sai "tomorrow"/"next
-  Monday"), ghi token usage qua `usage_service.log_usage`, bắt exception vào `state["error"]`.
-- **Tools** (`src/agents/tools/`, registry `ALL_TOOLS` trong `tools/__init__.py`, 11 tool):
-  - `summarize_conversation`, `extract_tasks` — đọc `state["context"]`, không cần xác nhận. Chỉ có
-    ý nghĩa trong 1 hội thoại cụ thể (khác `list_tasks` bên dưới).
-  - `search_messages` — tìm tin nhắn cũ trong đúng hội thoại đang chat theo từ khoá (Postgres
-    `ILIKE`, không phải semantic search — dự án chủ động không dùng vector store), đọc-only, không
-    cần xác nhận; `conversation_id` lấy từ `state`, không phải tham số LLM tự truyền.
-  - `create_calendar_event` / `list_calendar_events` / `update_calendar_event` /
-    `delete_calendar_event` — Google Calendar thật qua `google-api-python-client`; mọi thao tác có
-    tác dụng phụ đều bắt buộc `interrupt()` chờ xác nhận người dùng trước khi gọi API thật.
-  - `create_reminder` / `list_reminders` — tương tự, `create_reminder` bắt buộc `interrupt()` trước
-    khi lên lịch qua APScheduler (`SQLAlchemyJobStore`, bền vững qua restart).
-  - `list_tasks` / `list_memories` — đọc-only, không cần xác nhận; đọc thẳng bảng `tasks`/`memories`
-    của chính user đang chat (qua `task_service.list_tasks_for_owner`/`memory_service.
-    list_memories_for_owner`, dùng chung với route `GET /tasks`/`GET /memories`) — **không** đọc
-    theo hội thoại nào cả, khác hẳn `extract_tasks`. Đây là 2 tool duy nhất cho phép trang
-    `/assistant` (chat không gắn `conversation_id`) trả lời được câu hỏi kiểu "deadline nào sắp
-    tới"/"bạn nhớ gì về tôi" — trước khi có 2 tool này, panel "Bối cảnh của bạn" ở `/assistant` tuy
-    hiện đúng dữ liệu Task/Memory thật qua REST (`GET /tasks`, `/memories`, gọi trực tiếp từ
-    `AssistantContextPanel.jsx`, không qua agent) nhưng bản thân agent lại không có cách nào tự đọc
-    lại 2 nguồn đó khi được hỏi trực tiếp trong chat — planner ra 1 `AIMessage` rỗng, và
-    `_build_chat_response` (`src/api/routes.py`) coi đó là `status="completed"` hợp lệ nên không có
-    cả text lẫn lỗi hiển thị; giờ có 2 tool thật lẫn 1 câu fallback khi vẫn rỗng vì lý do khác.
-- **Checkpointer (memory hội thoại):** `AsyncPostgresSaver` (bền vững qua restart) — xây trong
-  `init_checkpointer()` lúc FastAPI lifespan khởi động, vì cần chạy trong event loop đang hoạt động
-  (`src/agents/graph.py`). `agent` là `None` cho tới khi hàm này chạy xong.
-- **Flow:**
+## 2. Context và container
 
 ```mermaid
-graph LR
-    START --> planner
-    planner -->|có tool call| tools
-    planner -->|trả lời thẳng / lỗi| END
-    tools -->|tool cần xác nhận| planner
-    tools -->|tool terminal| END
-```
-
-### 4. Agent chủ động (Proactive)
-- **Purpose:** phát hiện cam kết/lịch hẹn/hạn chót ngay khi tin nhắn mới tới, không cần người dùng
-  chủ động yêu cầu — mục "Nâng cao" của đề bài.
-- **Cách hoạt động** (`src/services/proactive_service.py::maybe_suggest_task`): chạy nền
-  (fire-and-forget) sau mỗi tin nhắn gửi qua REST (`chat_routes.py`, `BackgroundTasks`) hoặc
-  WebSocket (`websocket/routes.py`, `asyncio.create_task` giữ tham chiếu tránh bị GC). Pre-filter
-  rẻ bằng regex (EN+VI) trước khi gọi LLM để tiết kiệm chi phí; nếu qua bộ lọc, hỏi LLM xác nhận có
-  cam kết thật không, rồi tạo `Task` (`status="suggested"`, `source="proactive"`) và đẩy WebSocket
-  `task_suggested` → toast `TaskSuggestedToast.jsx` + mục "AI suggestions" trong `/tasks` để người
-  dùng Accept/Dismiss. Toàn bộ bọc try/except — lỗi không bao giờ chặn việc gửi tin nhắn.
-
-### 5. Database
-- **Type:** **PostgreSQL only** qua SQLAlchemy async (`asyncpg`), cấu hình qua `DATABASE_URL` trong
-  `.env` — bắt buộc, không có default, không còn nhánh SQLite. `src/db/session.py::_async_url()`
-  chỉ còn việc đổi scheme `postgresql://` → `postgresql+asyncpg://`.
-- **Windows:** bắt buộc chạy bằng `python scripts/run_dev.py` thay vì `uvicorn` CLI trực tiếp —
-  `AsyncPostgresSaver` cần `SelectorEventLoop`, nhưng CLI `uvicorn` trên Windows luôn chọn
-  `ProactorEventLoop` trước khi app được import, không cờ nào sửa được; `run_dev.py` gọi
-  `uvicorn.run()` trực tiếp bằng Python để chỉ định đúng loại event loop.
-- **Migration:** không dùng Alembic — bảng mới tạo tự động qua `Base.metadata.create_all()`, không
-  ALTER cột trên bảng cũ (không cần nữa từ khi bỏ SQLite — file DB SQLite cũ không còn tồn tại để
-  phải vá).
-- **Test suite:** chạy trên database Postgres riêng (`orbit_test` mặc định, đổi qua
-  `TEST_DATABASE_URL`) — tạo schema 1 lần cho cả phiên test (`tests/conftest.py::_test_database`,
-  session-scoped), truncate toàn bộ bảng sau mỗi test để cách ly. Engine dùng `NullPool` khi
-  `APP_ENV=test` vì test chạy app qua nhiều event loop khác nhau (`client` fixture dùng loop chính
-  của pytest-asyncio, `TestClient` cho WebSocket test dùng loop riêng trong thread nền) — asyncpg
-  connection bị bind cứng vào loop đã tạo ra nó, pool connection tái sử dụng giữa 2 loop sẽ lỗi
-  "attached to a different loop".
-- **Tables hiện có** (`src/db/models.py`): `User` (role, is_active, job_title, timezone,
-  preferences), `GoogleIdentity` (link `user_id` ↔ `google_sub` cho đăng nhập Google — bảng riêng,
-  không thêm cột vào `User`), `Conversation`, `ConversationParticipant`, `Message`, `Task` (status
-  suggested/pending/in_progress/completed/dismissed, source manual/proactive), `Reminder` (status
-  scheduled/fired/cancelled), `Memory` (ghi chú cá nhân người dùng tự thêm — category/title/detail,
-  **khác** với agent checkpoint memory ở trên), `UsageLog` (token mỗi lần gọi LLM),
-  `GoogleCalendarCredential` (1 dòng/user — `refresh_token_enc`/`access_token_enc` mã hoá Fernet,
-  `sync_token` cho polling đồng bộ, `google_email` để hiện UI; tồn tại = user đó đã Connect Google
-  Calendar riêng của họ — trước đây là `CalendarSyncState` dùng chung 1 dòng "default" cho cả app
-  hồi Calendar còn là 1 tài khoản chia sẻ, không mã hoá gì cả). Ngoài ra
-  APScheduler tự quản bảng `apscheduler_jobs`, và khi dùng Postgres, LangGraph tự quản các bảng
-  `checkpoints`/`checkpoint_blobs`/`checkpoint_writes`/`checkpoint_migrations`.
-
-### 6. Vector Store
-- **Hiện tại:** chưa nối — `chroma_persist_dir` khai báo sẵn trong `src/config.py` nhưng không nơi
-  nào trong code thực sự dùng embedding/vector search.
-- **Đánh giá:** yêu cầu "Cơ bản" về memory hội thoại đã đạt qua `AsyncPostgresSaver` (memory theo
-  từng thread), và "Memory cá nhân" (sở thích, thói quen...) đã đạt qua tính năng Memory (ghi chú do
-  người dùng tự thêm, `/memory`). Đề bài chỉ liệt kê Qdrant/pgvector ở mục "Tech stack gợi ý", không
-  phải yêu cầu đầu ra bắt buộc — nên vector store dài hạn hiện **không còn là việc cần làm rõ ràng**,
-  chỉ cân nhắc nếu sau này cần semantic search xuyên nhiều hội thoại cũ.
-
-## Data Flow
-
-1. User gửi tin nhắn/thao tác từ Frontend qua REST hoặc WebSocket.
-2. Route xác thực (JWT) và validate input (Pydantic schema trong `src/models/`).
-3. Với tin nhắn người-với-người: broadcast realtime qua `src/websocket/` tới thành viên khác, đồng
-   thời chạy nền `proactive_service.maybe_suggest_task` để phát hiện cam kết/lịch hẹn.
-4. Với tin nhắn agent (`POST /api/v1/chat`): verify participant nếu có `conversation_id`, build
-   `AgentState`, chạy qua LangGraph (`src/agents/graph.py::agent`, checkpoint theo `thread_id`).
-5. Planner gọi LLM (Gemini/Groq); nếu cần hành động có tác dụng phụ (calendar/reminder), graph dừng
-   lại ở `interrupt()` chờ xác nhận qua `POST /api/v1/chat/resume`.
-6. Song song, APScheduler chạy 2 job nền: bắn `reminder_fired` đúng giờ hẹn, và poll Google Calendar
-   mỗi `CALENDAR_POLL_INTERVAL_SECONDS` (mặc định 20s) để bắt thay đổi tạo trực tiếp trong Google
-   Calendar (ngoài app) — cả hai đẩy kết quả qua WebSocket cho người liên quan.
-
-## Deployment Architecture
-
-```mermaid
-graph LR
-    subgraph "Hiện tại (local only)"
-        BE_C[Backend - scripts/run_dev.py hoặc Dockerfile]
-        FE_C[Frontend - vite dev server]
-        DB_C[(PostgreSQL - local)]
+flowchart TB
+    subgraph Browser
+        USER[User SPA]
+        ADMIN[Admin SPA]
     end
+
+    subgraph Backend[FastAPI process]
+        REST[REST routers]
+        WS[WebSocket endpoint]
+        AUTH[Auth + authorization]
+        SVC[Domain services]
+        GRAPH[LangGraph agent]
+        JOBS[APScheduler]
+    end
+
+    PG[(PostgreSQL)]
+    LLM[Google Gemini / Groq / OpenAI]
+    GOOGLE[Google Identity + Calendar APIs]
+
+    USER --> REST
+    ADMIN --> REST
+    USER <--> WS
+    REST --> AUTH
+    WS --> AUTH
+    REST --> SVC
+    WS --> SVC
+    REST --> GRAPH
+    GRAPH --> SVC
+    GRAPH --> LLM
+    SVC --> PG
+    GRAPH --> PG
+    JOBS --> PG
+    SVC --> GOOGLE
+    JOBS --> GOOGLE
 ```
 
-`Dockerfile` (multi-stage, non-root, healthcheck `/health`) và `docker-compose.yml` định nghĩa
-service `backend` nhưng **chưa deploy online thật** — chưa có domain public, chưa có CD workflow
-ngoài `ci.yml` (lint + test trên GitHub Actions). Đây là hạng mục lớn nhất còn thiếu so với đề bài.
+Mọi khối trong `Backend` cùng process và cùng vòng đời FastAPI. Không có queue, Redis, worker riêng
+hay event bus phân tán.
 
-## Security
+## 3. Boundary trong code
 
-- API key/secret đọc từ `.env` (không commit), ví dụ `GOOGLE_API_KEY`, `GROQ_API_KEY`, `SECRET_KEY`.
-- Input validation qua Pydantic ở mọi route.
-- Password hash bcrypt, JWT cho auth — xem quy ước "không tự ý đổi cơ chế" trong `CLAUDE.md`.
-- CORS cấu hình qua `cors_origins` trong `.env`.
-- Human-in-the-loop bắt buộc cho mọi tool có tác dụng phụ (calendar, reminder) — không được bỏ
-  qua kể cả để test nhanh (quy ước trong `CLAUDE.md`).
-- `/api/v1/chat` verify current_user là participant của `conversation_id` trước khi agent xử lý —
-  chặn user A mượn nội dung hội thoại của user B qua request tự chế.
-- Rate limiting: **đã có** (slowapi, in-memory, phù hợp vì app chạy 1 uvicorn worker/1 instance,
-  không cần Redis) — `src/api/rate_limit.py`. Auth (`/register` 5/phút, `/login`+`/google` 10/phút)
-  và `/chat` (15/phút) theo IP/user khoá riêng qua `@limiter.limit(...)`; CRUD còn lại (tasks,
-  reminders, memories, calendar, conversations/messages, admin) 60/phút/user qua dependency dùng
-  chung `Depends(crud_rate_limit)` gắn ở từng router (không dùng `Limiter(default_limits=...)` +
-  `SlowAPIMiddleware` như tài liệu slowapi gợi ý mặc định — bản FastAPI đang pin không còn làm
-  phẳng route của `include_router()` vào `app.routes`, khiến middleware đó không tìm thấy handler
-  và coi mọi route là exempt; đã xác nhận bằng test, không phải suy đoán). `/health`, `/status`,
-  `/chat/resume` cố tình miễn (`@limiter.exempt`) — resume hoàn tất 1 hành động human-in-the-loop
-  đã xác nhận, chặn ở đó có thể treo `interrupt()`. Bổ sung cho `DAILY_TOKEN_BUDGET`
-  (`usage_service.is_over_budget()`), không thay thế: budget chặn theo $ tổng/ngày, rate limit
-  chặn burst/abuse theo phút.
-- Quyền AI đọc hội thoại: bảng `ai_permissions` (`conversation_id`, `user_id`, `granted`) thật ở
-  backend — mỗi participant tự cấp/thu hồi quyền cho AI đọc hội thoại đó, độc lập với các thành
-  viên khác (không cần đồng thuận cả nhóm). `POST /api/v1/chat` (`src/api/routes.py`) gọi
-  `chat_service.assert_ai_permission` ngay sau `assert_participant`, trước khi build context cho
-  agent — 403 nếu chưa cấp quyền hoặc quyền đã bị thu hồi. `GET/PUT /conversations/{id}/ai-permission`
-  (`src/api/chat_routes.py`) cho FE đọc/ghi; `AIPanel.jsx` gọi API thật thay vì state cục bộ, mặc
-  định hiển thị "Permission required" cho tới khi fetch xong. Panel vẫn giữ dòng minh bạch báo
-  người dùng nội dung sẽ được gửi sang Gemini/Groq.
-- Không có mã hoá đầu-cuối (E2E) thật — quyết định có chủ đích, xem `ROADMAP.md`. Đã rà soát:
-  không có nơi nào trong `src/` log/lưu nội dung tin nhắn thô ra ngoài DB của app —
-  `usage_service.py` chỉ log số token (không log nội dung prompt), không có `print`/`logger` nào
-  khác đụng tới nội dung tin nhắn; nội dung chỉ rời khỏi app khi agent gửi sang LLM provider đã
-  khai báo (Gemini/Groq), và chỉ khi `ai_permissions` cho phép.
-
-## Design Decisions
-
-| Decision | Choice | Reason |
+| Layer | Vị trí | Trách nhiệm |
 | --- | --- | --- |
-| Backend framework | FastAPI | Async, auto-docs (`/docs`), type-safe qua Pydantic |
-| Agent orchestration | LangGraph | Quản lý state + human-in-the-loop (`interrupt`) sẵn có, phù hợp yêu cầu xác nhận trước hành động |
-| LLM provider | Google Gemini hoặc Groq (`src/services/llm.py::get_llm()`, đổi qua `LLM_PROVIDER`) | Đổi được khi 1 bên hết quota — thực tế đã cần dùng đến (Gemini free-tier từng về 0 quota) |
-| Database | PostgreSQL only (bỏ SQLite) | Cần cho agent memory bền vững qua restart (`AsyncPostgresSaver`), FK constraint thật (SQLite không enforce mặc định), một DB duy nhất cho cả dev lẫn test |
-| Vector store | Không triển khai | Yêu cầu memory đã đạt qua checkpointer + tính năng Memory ghi chú; không có nhu cầu semantic search rõ ràng để biện minh thêm 1 service |
-| Frontend framework | React + Vite | Giữ nguyên so với đề bài gợi ý Next.js — tránh viết lại toàn bộ frontend không tương xứng lợi ích |
-| Realtime | WebSocket thuần (FastAPI) | Dùng chung 1 kênh cho chat, reminder-fired, proactive-suggestion, calendar sync — không mở kênh song song |
-| Scheduler | APScheduler (`SQLAlchemyJobStore`) | Bền vững qua restart, dùng chung cho reminder-fire và calendar-poll thay vì đổi hẳn sang BullMQ/Node |
-| Đồng bộ Google Calendar | Polling định kỳ với `syncToken`, lặp riêng theo từng user **đang online** đã Connect (không phải webhook `events.watch`) | Webhook thật của Google cần domain public HTTPS mà project chưa deploy — polling là lựa chọn thực tế, có thể nâng cấp lên webhook sau khi deploy. Chỉ poll user đang online (không phải mọi user đã Connect) để không tốn quota Google cho thay đổi lịch của người không mở app — họ tự fetch lại khi mở `/calendar` |
-| Google Calendar OAuth | Per-user, redirect thật (`GET /calendar/oauth/url` → Google → `GET /calendar/oauth/callback` ở backend), OAuth Client "Web application" tách biệt với client đăng nhập, `state` ký JWT mang `user_id` | Yêu cầu đề bài "lịch cá nhân" — user phải thấy đúng lịch của họ, không phải 1 lịch dùng chung cho cả app. Tách 2 OAuth Client vì đăng nhập chỉ verify ID token (không cần secret), Calendar cần authorization-code + refresh_token (bắt buộc có secret) — không phải xin quyền Calendar ngay lúc đăng nhập |
-| Mã hoá refresh token | Fernet (`src/auth/crypto.py`), key `CREDENTIAL_ENCRYPTION_KEY` | Refresh token Calendar là bí mật dài hạn — lộ ra là đọc/ghi được lịch của user vô thời hạn tới khi họ tự revoke, khác `password_hash` (một chiều) hay JWT `secret_key` (không phải thứ đọc trực tiếp ra hành động trên tài khoản Google người khác) |
+| Bootstrap | `src/main.py`, `src/config.py` | Khởi tạo app, CORS, lifespan, settings |
+| Transport | `src/api/`, `src/websocket/` | HTTP/WS contract, dependency injection, status code |
+| Identity | `src/auth/` | JWT, bcrypt, Google ID-token, current-user dependency |
+| Authorization | `src/services/authorization_service.py` | Platform role và conversation resource role |
+| Domain/integration | `src/services/` | Chat, Calendar, credentials, reminders, usage, audit, proactive AI |
+| Agent | `src/agents/` | StateGraph, planner và tool registry |
+| Persistence | `src/db/` | ORM models, async session, migration |
+| Contracts | `src/models/` | Pydantic schemas |
+| Presentation | `Frontend/` | Hai SPA và source UI dùng chung |
 
-Tiến độ triển khai theo giai đoạn và các hạng mục còn lại: xem [ROADMAP.md](ROADMAP.md).
+Route nhìn chung mỏng và gọi service, nhưng một phần orchestration vẫn nằm trực tiếp trong route,
+đáng chú ý ở agent chat và task side effects.
+
+## 4. Runtime lifecycle
+
+`src.main:app` dùng FastAPI lifespan:
+
+1. Đọc `Settings` từ environment/`.env` (được cache bằng `lru_cache`).
+2. Development/test gọi `Base.metadata.create_all()`; production cố ý bỏ qua.
+3. Tải AI configuration đã lưu trong `platform_settings` và áp vào Settings đang cache.
+4. Tạo `AsyncConnectionPool`, chạy `AsyncPostgresSaver.setup()` và compile LangGraph.
+5. Khởi động APScheduler, đăng ký job `calendar_poll` dạng interval.
+6. Khi shutdown: dừng scheduler và đóng checkpoint pool.
+
+Hệ quả: request `/chat` chỉ hợp lệ sau khi lifespan hoàn tất. Lỗi kết nối database/checkpointer làm
+startup thất bại, health check không lên.
+
+## 5. API surface
+
+Tất cả route nghiệp vụ nằm dưới `/api/v1`; `/health` nằm ở root.
+
+| Prefix | Nhóm chức năng | Authorization |
+| --- | --- | --- |
+| `/auth` | register/login, Google login, profile, đổi mật khẩu | Public hoặc current user tùy route |
+| `/conversations`, `/users` | danh sách user, hội thoại, message, read marker, AI consent | JWT + participant/resource role |
+| `/chat`, `/chat/resume` | chạy/resume LangGraph | JWT; thêm participant + consent nếu có conversation |
+| `/ws` | gửi/nhận event realtime | JWT trong query string + resource check mỗi message |
+| `/tasks` | CRUD/status task | JWT + owner; conversation link được kiểm tra khi có |
+| `/calendar` | OAuth connection và Calendar event | JWT, trừ OAuth callback dùng signed state |
+| `/reminders` | list/create/cancel reminder | JWT + owner |
+| `/memories` | CRUD memory | JWT + owner |
+| `/admin` | health, users, AI config/usage, audit | `platform_admin` |
+| `/platform/stats` | thống kê toàn nền tảng | `platform_admin` |
+
+FastAPI tự sinh OpenAPI/Swagger tại `/docs` khi không bị hạ tầng ngoài chặn.
+
+## 6. Identity và authorization
+
+### 6.1 Danh tính
+
+- Email/password: bcrypt hash trong `users.password_hash`.
+- Google sign-in: frontend nhận ID token; backend xác minh audience/signature rồi liên kết qua
+  `google_identities.google_sub`.
+- Cả hai flow phát cùng loại JWT, subject là `user_id`.
+- User bị `is_active=false` nhận 403 dù JWT còn hạn.
+
+### 6.2 Hai trục quyền độc lập
+
+```text
+Platform:     user | platform_admin
+Conversation: viewer < participant < manager
+AI consent:   granted true/false cho từng (conversation, user)
+```
+
+`platform_admin` quản lý vận hành nhưng không bypass `require_conversation_access`. Conversation
+không tồn tại hoặc user không phải participant đều trả 404 để giảm khả năng enumerate resource.
+Participant có `revoked_at` cũng bị loại khỏi truy cập và broadcast.
+
+Để AI đọc một hội thoại, caller phải vừa là participant vừa có `ai_permissions.granted=true` của
+chính họ. Consent không yêu cầu tất cả thành viên trong nhóm đồng ý.
+
+## 7. Kiến trúc agent
+
+### 7.1 Graph
+
+```mermaid
+stateDiagram-v2
+    [*] --> planner
+    planner --> tools: AIMessage có tool call
+    planner --> [*]: trả lời trực tiếp hoặc error
+    tools --> [*]: summarize / extract_tasks
+    tools --> planner: các tool còn lại
+```
+
+Graph có hai node:
+
+- `planner`: dựng system prompt có thời gian theo `calendar_timezone`, bind 9 tool, gọi LLM và ghi
+  usage.
+- `tools`: `ToolNode(ALL_TOOLS)` thực thi tool call.
+
+`summarize_conversation` và `extract_tasks` là terminal tool; output của chúng được trả thẳng để
+tránh thêm một lượt LLM. Các tool khác quay lại planner để diễn đạt kết quả.
+
+### 7.2 State và checkpoint
+
+`AgentState` dùng reducer `add_messages` và chứa `context`, `user_id`, `conversation_id`, `error`
+cùng một số draft field. `user_id` và `conversation_id` được server inject, không phải argument do
+LLM tự chọn.
+
+Runtime thật dùng `AsyncPostgresSaver`, checkpoint theo `configurable.thread_id`. Test dùng
+`MemorySaver`. Checkpoint giúp resume sau `interrupt()` và giữ lịch sử agent qua restart.
+
+### 7.3 Tool registry
+
+| Tool | Read/write | Cần xác nhận |
+| --- | --- | --- |
+| `summarize_conversation` | Gọi LLM trên context | Không |
+| `extract_tasks` | Gọi LLM, trả JSON task draft | Không |
+| `search_messages` | PostgreSQL `ILIKE` trong conversation hiện tại | Không |
+| `list_calendar_events` | Đọc Google Calendar của user | Không |
+| `create_calendar_event` | Tạo Google Calendar event | Có |
+| `update_calendar_event` | Sửa Google Calendar event | Có |
+| `delete_calendar_event` | Xóa Google Calendar event | Có |
+| `list_reminders` | Đọc reminder của user | Không |
+| `create_reminder` | Ghi DB + schedule job | Có |
+
+Human-in-the-loop dùng `interrupt(payload)` và `Command(resume=...)`. Client có thể approve, reject
+hoặc gửi edits; tool chỉ thực hiện side effect sau khi graph được resume với `approved=true`.
+
+### 7.4 Provider và ngân sách
+
+`get_llm()` hỗ trợ `google`, `groq`, `openai`. Admin có thể chọn provider/model/temperature từ allowlist;
+cấu hình được lưu vào `platform_settings` và áp dụng cho các call tiếp theo trong process.
+
+Mỗi call ghi prompt/completion/total token vào `usage_logs`, không ghi prompt content. Ngưỡng 80%
+và 100% tạo cảnh báo realtime cho admin. `/chat` mới và proactive detection bị chặn khi vượt budget;
+`/chat/resume` vẫn được phép để hoàn tất flow đã chờ xác nhận.
+
+## 8. Chat realtime và proactive AI
+
+WebSocket manager giữ `dict[user_id, set[WebSocket]]` trong RAM. Client reconnect sau 2 giây. Các
+event chính gồm message mới, task suggestion/update, calendar change, reminder fired và budget alert.
+
+Luồng gửi message:
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant W as WebSocket route
+    participant D as PostgreSQL
+    participant P as Proactive service
+    participant L as LLM
+
+    C->>W: send_message
+    W->>D: kiểm tra participant, lưu Message
+    W-->>C: broadcast new_message
+    W-->>P: create_task (fire-and-forget)
+    P->>P: regex pre-filter + consent + budget
+    P->>L: phân loại cam kết
+    P->>D: tạo Task(status=suggested)
+    P-->>C: task_suggested
+```
+
+REST gửi message cũng khởi chạy proactive detection bằng FastAPI `BackgroundTasks`. Mọi exception
+trong flow proactive được log và không làm thất bại việc gửi tin.
+
+## 9. Calendar và scheduler
+
+`google_identities` chỉ phục vụ đăng nhập. `google_calendar_credentials` là flow riêng, giữ refresh
+token/access token được mã hóa Fernet, scope và incremental `sync_token` cho từng user.
+
+Calendar service gọi Google API trong threadpool vì client Google là synchronous. Thay đổi qua app
+được broadcast ngay; thay đổi trực tiếp trên Google được job `calendar_poll` phát hiện. Poll chỉ chạy
+cho user đang có WebSocket và đã kết nối Calendar. HTTP 410 làm reset sync token và full sync lại.
+
+APScheduler dùng `SQLAlchemyJobStore` qua psycopg sync. Reminder có hai lớp persistence:
+
+- row domain trong `reminders` giữ nội dung/trạng thái;
+- row trong `apscheduler_jobs` giữ lịch thực thi.
+
+Scheduler và web server cùng process, do đó uptime của web service quyết định độ đúng giờ.
+
+## 10. Persistence model
+
+```mermaid
+erDiagram
+    USER ||--o| GOOGLE_IDENTITY : authenticates
+    USER ||--o| GOOGLE_CALENDAR_CREDENTIAL : connects
+    USER ||--o{ CONVERSATION_PARTICIPANT : joins
+    CONVERSATION ||--o{ CONVERSATION_PARTICIPANT : has
+    CONVERSATION ||--o{ MESSAGE : contains
+    USER ||--o{ MESSAGE : sends
+    USER ||--o{ AI_PERMISSION : grants
+    CONVERSATION ||--o{ AI_PERMISSION : scopes
+    USER ||--o{ TASK : owns
+    CONVERSATION o|--o{ TASK : originates
+    USER ||--o{ REMINDER : owns
+    USER ||--o{ MEMORY : owns
+    USER ||--o{ USAGE_LOG : incurs
+    USER ||--o{ AUDIT_LOG : acts
+```
+
+### Trạng thái và constraint đáng chú ý
+
+- Conversation: `direct | group`.
+- Resource role: `viewer | participant | manager`.
+- Task: source `manual | ai_extracted | proactive`; status `suggested | pending | in_progress |
+  completed | dismissed`.
+- Reminder: source `manual | agent | proactive`; status `scheduled | fired | cancelled`.
+- User platform role: logic ứng dụng dùng `user | platform_admin`.
+
+Không có vector store đang hoạt động. `chroma_persist_dir` là cấu hình dư; lịch sử agent nằm trong
+checkpoint và message search là keyword search trong PostgreSQL.
+
+## 11. Schema lifecycle
+
+Alembic có chuỗi migration từ `20260803_01` đến `20260813_08`. Revision mới nhất xóa workspace,
+external contacts và các bảng liên quan; downgrade cố ý không hỗ trợ vì mất dữ liệu không thể phục hồi.
+
+- Development: startup gọi `create_all()`, tiện cho database mới nhưng không nâng cấp bảng đã tồn tại.
+- Production: startup không gọi `create_all()`; phải chạy `alembic upgrade head` trước khi start app.
+- Test: cho phép SQLite in-memory cho unit test; integration checkpointer cần PostgreSQL riêng.
+
+**Khoảng trống hiện tại:** `Dockerfile`, `render.yaml` và workflow deploy chưa có bước Alembic. Deploy
+vào database trống hoặc schema cũ có thể fail ở startup/runtime. Pipeline cần một migration step có
+quyền DB, chạy một lần trước khi chuyển traffic.
+
+## 12. Frontend architecture
+
+Hai Vite app có entry point/package riêng nhưng import chung code trong `Frontend/src`:
+
+- `Frontend/user`: route sản phẩm cho user, port dev 5173.
+- `Frontend/admin`: route vận hành nền tảng, port dev 5174.
+- `Frontend/src/api/client.js`: chuẩn hóa base URL, Bearer header và lỗi API.
+- `AuthContext`: giữ JWT/user; `ProtectedRoute` và `AdminGuard` bảo vệ UI.
+- `AppLayout`: sở hữu WebSocket dùng chung, phân phối `subscribe/sendJson` qua outlet context.
+
+UI guard chỉ phục vụ trải nghiệm; backend dependency luôn là lớp authorization quyết định.
+
+## 13. Deployment topology
+
+```mermaid
+flowchart LR
+    VU[Vercel User app]
+    VA[Vercel Admin app]
+    R[Render Docker service]
+    S[(Supabase PostgreSQL)]
+    G[Google APIs]
+    L[LLM provider]
+
+    VU --> R
+    VA --> R
+    R --> S
+    R --> G
+    R --> L
+```
+
+Đây là topology được cấu hình trong repo, không phải bằng chứng môi trường thật đang online.
+`docker-compose.yml` cung cấp backend + PostgreSQL local. Render build `Dockerfile`; Vercel dùng SPA
+rewrite. GitHub Actions lint/test với PostgreSQL, gọi Render deploy hook sau CI và có keep-alive cron.
+
+## 14. Security posture
+
+### Đã triển khai
+
+- JWT authentication, bcrypt password hash, account disable check.
+- Resource authorization cho conversation và owner check cho dữ liệu cá nhân.
+- Per-user consent trước khi AI đọc chat.
+- Fernet encryption cho Calendar credential at rest.
+- Human confirmation cho agent side effects.
+- Pydantic validation và production settings validation.
+- Audit metadata loại bỏ một số key nhạy cảm; usage log không lưu prompt content.
+- System prompt có chỉ dẫn chống prompt injection từ conversation/tool data.
+
+### Rủi ro còn lại
+
+| Mức | Rủi ro | Ảnh hưởng / hướng xử lý |
+| --- | --- | --- |
+| Cao | Owner của `thread_id` chỉ lưu trong `_thread_owners` RAM, trong khi checkpoint bền vững và `thread_id` do client gửi | Sau restart/multi-worker, thread biết trước có thể bị process khác nhận. Lưu `(thread_id, owner_id)` trong DB và kiểm tra trước cả invoke/resume |
+| Cao | Production deploy không tự chạy Alembic | Database mới/cũ có thể thiếu schema. Thêm pre-deploy migration và backup/rollback procedure |
+| Trung bình | WebSocket manager chỉ in-memory | Multi-instance không broadcast chéo. Dùng Redis pub/sub hoặc một realtime service |
+| Trung bình | APScheduler nằm trong mọi web process | Sleep làm reminder trễ; nhiều replica có thể chạy poll/job cạnh tranh. Tách dedicated worker và leader lock |
+| Trung bình | JWT truyền trong WebSocket query string | Token có thể xuất hiện trong proxy/access log. Dùng short-lived WS ticket hoặc cookie/header phù hợp hạ tầng |
+| Trung bình | Chưa rate limit API/LLM/auth | Có thể brute force hoặc đốt quota. Thêm rate limit theo IP/user/route |
+| Thấp | Không có E2E encryption | Server/database/LLM provider nhìn thấy plaintext cần thiết cho xử lý; phải mô tả rõ trong privacy policy |
+
+Ngoài ra, không nên scale backend trên một worker cho tới khi ba trạng thái process-local (WebSocket,
+thread ownership, scheduler leadership) được thay thế hoặc điều phối.
+
+## 15. Observability và kiểm thử
+
+- `/health` chỉ xác nhận process trả lời và environment, không probe DB/LLM/scheduler.
+- `/api/v1/admin/system-health` kiểm tra DB, scheduler, WebSocket count và cấu hình LLM cho admin.
+- Logging chủ yếu dùng Python logging; chưa có structured log, trace, metrics exporter hoặc error tracker.
+- CI chạy Ruff và toàn bộ pytest với PostgreSQL service; unit test có thể dùng SQLite/MemorySaver.
+- `scripts/eval_extract_tasks.py` là eval LLM thủ công, không nằm trong test deterministic.
+
+## 16. Quyết định kiến trúc hiện tại
+
+| Quyết định | Lý do | Trade-off |
+| --- | --- | --- |
+| Modular monolith | Đơn giản triển khai và phát triển | Background/realtime khó scale độc lập |
+| PostgreSQL-only runtime | Dùng chung persistence cho domain, scheduler, checkpoints | Setup local nặng hơn SQLite |
+| LangGraph | Có state/checkpoint/interrupt cho HITL | Thread lifecycle và ownership phải quản trị chặt |
+| Per-user Calendar OAuth | Cô lập đúng tài khoản từng user | Quản lý token, polling và quota phức tạp |
+| Multi-provider LLM | Đổi model khi quota/chi phí thay đổi | Khác biệt tool-calling giữa provider cần test |
+| Không vector store | Tránh thêm hạ tầng khi chưa có use case rõ | Chưa có semantic search xuyên hội thoại |
+| Admin không đọc chat | Privacy mặc định tốt hơn | Khó hỗ trợ/điều tra nội dung khi có sự cố |
+
+## 17. Ưu tiên kỹ thuật đề xuất
+
+1. Thêm Alembic pre-deploy step và kiểm chứng deploy trên database trống.
+2. Persist agent thread ownership, ràng buộc thread với user và thêm test restart/cross-user.
+3. Tách scheduler thành một worker duy nhất hoặc thêm distributed lock.
+4. Thêm Redis/pub-sub trước khi chạy nhiều backend replica.
+5. Thêm rate limiting, short-lived WebSocket ticket và security headers.
+6. Nâng `/health` thành liveness/readiness riêng; thêm structured logging và error monitoring.

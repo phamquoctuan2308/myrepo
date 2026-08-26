@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 
@@ -12,6 +14,8 @@ async def test_create_and_list_memory(client, auth_headers):
     body = resp.json()
     assert body["category"] == "Preference"
     assert body["title"] == "Prefers async standups"
+    assert body["memory_type"] == "semantic"
+    assert body["sensitivity"] == "normal"
 
     resp = await client.get("/api/v1/memories", headers=auth_headers)
     assert resp.status_code == 200
@@ -74,3 +78,45 @@ async def test_memory_not_visible_to_other_user(client, auth_headers, other_auth
 
     resp = await client.delete(f"/api/v1/memories/{created['id']}", headers=other_auth_headers)
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_expired_memory_is_hidden_by_default(client, auth_headers):
+    response = await client.post(
+        "/api/v1/memories",
+        json={
+            "category": "Work",
+            "title": "Temporary context",
+            "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 201
+    memory_id = response.json()["id"]
+
+    response = await client.patch(
+        f"/api/v1/memories/{memory_id}",
+        json={"expires_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    active = await client.get("/api/v1/memories", headers=auth_headers)
+    assert memory_id not in [item["id"] for item in active.json()]
+    all_items = await client.get(
+        "/api/v1/memories", params={"include_expired": True}, headers=auth_headers
+    )
+    assert memory_id in [item["id"] for item in all_items.json()]
+
+
+@pytest.mark.asyncio
+async def test_memory_provenance_fields_must_be_complete(client, auth_headers):
+    response = await client.post(
+        "/api/v1/memories",
+        json={
+            "category": "Work",
+            "title": "Incomplete source",
+            "source_conversation_id": "conversation-1",
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 422

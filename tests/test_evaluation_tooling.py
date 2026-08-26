@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from scripts.benchmark_api_latency import percentile, summarize_latencies
-from scripts.eval_ragas import load_cases
+from scripts.eval_ragas import _localize_answer_relevancy_prompt, _select_cases, load_cases
+from scripts.generate_evaluation_evidence import provider_model_label
 from scripts.run_coverage import build_command
 from scripts.summarize_user_feedback import load_responses, summarize
 
@@ -34,6 +35,11 @@ def test_coverage_command_enforces_local_source_gate():
     assert any(argument.endswith("test-results.junit.xml") for argument in command)
 
 
+def test_provider_model_label_does_not_duplicate_provider_prefix():
+    assert provider_model_label("openai", "openai/gpt-5.6-luna") == "openai/gpt-5.6-luna"
+    assert provider_model_label("groq", "openai/gpt-oss-20b") == "groq/openai/gpt-oss-20b"
+
+
 def test_ragas_dataset_is_non_empty_synthetic_and_unique():
     cases = load_cases(ROOT / "eval" / "ragas" / "conversation_summary_cases.jsonl")
 
@@ -41,6 +47,53 @@ def test_ragas_dataset_is_non_empty_synthetic_and_unique():
     assert len({case["case_id"] for case in cases}) == len(cases)
     assert all(case["retrieved_contexts"] for case in cases)
     assert all("response" not in case for case in cases)
+
+
+def test_ragas_case_selection_rejects_unknown_ids_and_preserves_dataset_order():
+    cases = [{"case_id": "a"}, {"case_id": "b"}, {"case_id": "c"}]
+
+    assert _select_cases(cases, ["c", "a"]) == [cases[0], cases[2]]
+    with pytest.raises(ValueError, match="Unknown RAGAS case IDs: missing"):
+        _select_cases(cases, ["missing"])
+
+
+def test_answer_relevancy_judge_is_localized_to_vietnamese():
+    class Input:
+        def __init__(self, *, response):
+            self.response = response
+
+    class Output:
+        def __init__(self, *, question, noncommittal):
+            self.question = question
+            self.noncommittal = noncommittal
+
+    class Prompt:
+        input_model = Input
+        output_model = Output
+        instruction = "English default"
+        examples = []
+        language = "english"
+
+    class Scorer:
+        question_generation = Prompt()
+
+    scorer = Scorer()
+    _localize_answer_relevancy_prompt(scorer)
+
+    assert scorer.question_generation.language == "vietnamese"
+    assert "câu hỏi bằng tiếng Việt" in scorer.question_generation.instruction
+    assert (
+        scorer.question_generation.examples[0][1].question
+        == "Tóm tắt kế hoạch triển khai và các rủi ro chính."
+    )
+
+    class CollectionScorer:
+        prompt = Prompt()
+
+    collection_scorer = CollectionScorer()
+    _localize_answer_relevancy_prompt(collection_scorer)
+
+    assert collection_scorer.prompt.language == "vietnamese"
 
 
 def test_empty_feedback_is_pending_not_a_fake_pass():

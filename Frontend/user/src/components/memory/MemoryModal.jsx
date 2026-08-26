@@ -1,0 +1,62 @@
+import { useEffect, useState } from 'react'
+import { useAuth } from '../../context/AuthContext'
+import { createMemory, updateMemory } from '../../api/memories'
+
+const CATEGORIES = ['Work', 'Preference', 'Language', 'Routine']
+
+export default function MemoryModal({ open, onClose, onSaved, memory = null, workspaceId }) {
+  const { token } = useAuth()
+  const [category, setCategory] = useState('Preference')
+  const [title, setTitle] = useState('')
+  const [detail, setDetail] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    setCategory(memory?.category || 'Preference')
+    setTitle(memory?.title || '')
+    setDetail(memory?.detail || '')
+    setError('')
+  }, [open, memory])
+
+  if (!open) return null
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!title.trim()) return
+    setSubmitting(true); setError('')
+    try {
+      const saved = memory
+        ? await updateMemory(token, memory.id, { category, title: title.trim(), detail: detail.trim() })
+        : await createMemory(token, { workspace_id: workspaceId, category, title: title.trim(), detail: detail.trim() })
+      onSaved(saved)
+      onClose()
+    } catch (err) { setError(err.detail || 'Could not save this memory.') }
+    finally { setSubmitting(false) }
+  }
+
+  return (
+    <div className="modal show d-block" tabIndex="-1" style={{ background: 'rgba(20,30,50,.32)' }} onClick={onClose}>
+      <div className="modal-dialog modal-dialog-centered" onClick={e => e.stopPropagation()}>
+        <div className="modal-content">
+          <div className="modal-header"><h5 className="modal-title">{memory ? 'Edit memory' : 'Add memory'}</h5><button className="btn-close" onClick={onClose} /></div>
+          <form onSubmit={submit}>
+            <div className="modal-body d-flex flex-column gap-3">
+              {error && <div className="auth-error">{error}</div>}
+              <select className="form-select" value={category} onChange={e => setCategory(e.target.value)}>
+                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <input className="form-control" placeholder="What should Orbit remember?" value={title} onChange={e => setTitle(e.target.value)} required />
+              <textarea className="form-control" placeholder="Details (optional)" value={detail} onChange={e => setDetail(e.target.value)} rows={3} />
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-light" onClick={onClose}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={submitting}>{submitting ? 'Saving...' : memory ? 'Save changes' : 'Add memory'}</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}

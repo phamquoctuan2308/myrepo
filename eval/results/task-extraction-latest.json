@@ -1,0 +1,14 @@
+{
+  "as_of": "2026-08-21",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "case_count": 37,
+  "title_precision": 0.85,
+  "title_recall": 1.0,
+  "title_f1": 0.9189189189189189,
+  "date_correct": 23,
+  "date_checked": 28,
+  "date_accuracy": 0.8214285714285714,
+  "f1_threshold": 0.7,
+  "date_accuracy_threshold": 0.7,
+  "llm_errors": []
+}

@@ -16,7 +16,7 @@ async def test_extract_tasks_reads_context_from_state(monkeypatch):
     state = {"context": "Alice: don't forget to send the report Friday"}
     result = await task_tool.extract_tasks.coroutine(state=state)
 
-    assert result == '[{"title": "Send report", "due_at": null, "priority": "High"}]'
+    assert result == '[{"title":"Send report","due_at":null,"priority":"High"}]'
     fake_llm.ainvoke.assert_awaited_once()
     prompt = fake_llm.ainvoke.await_args.args[0]
     assert "send the report" in prompt
@@ -38,30 +38,9 @@ def test_state_hidden_from_llm_tool_schema():
     assert list(task_tool.extract_tasks.args.keys()) == []
 
 
-@pytest.mark.asyncio
-async def test_list_tasks_formats_saved_tasks(client, auth_headers):
-    me = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()
-    await client.post(
-        "/api/v1/tasks",
-        json={"title": "Send report", "priority": "High", "due_at": "2026-08-20T15:00:00"},
-        headers=auth_headers,
-    )
-
-    result = await task_tool.list_tasks.coroutine(state={"user_id": me["id"]})
-
-    assert "Send report" in result
-    assert "High" in result
-    assert "suggested" in result
-
-
-@pytest.mark.asyncio
-async def test_list_tasks_no_saved_tasks():
-    result = await task_tool.list_tasks.coroutine(state={"user_id": "no-such-user"})
-    assert result == "The user has no tasks saved."
-
-
-def test_list_tasks_hidden_from_llm_tool_schema():
-    assert list(task_tool.list_tasks.args.keys()) == []
+# NOTE: task_tool.list_tasks (feature/delivery-agent-tools' read-only "list saved tasks" tool) was
+# dropped when this test suite was ported onto develop - src.agents.tools.context_tool.list_my_tasks
+# is develop's own equivalent, already wired into ALL_TOOLS.
 
 
 @pytest.mark.asyncio
@@ -85,3 +64,18 @@ async def test_generate_tasks_json_logs_usage(monkeypatch):
 
     assert result == "[]"
     assert logged["usage_metadata"]["total_tokens"] == 10
+
+
+@pytest.mark.asyncio
+async def test_task_prompt_excludes_preferences_roles_and_completed_work(monkeypatch):
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke.return_value = AsyncMock(content="[]", usage_metadata=None)
+    monkeypatch.setattr(task_tool, "get_llm", lambda: fake_llm)
+
+    await task_tool.generate_tasks_json("Lan owns backend. Redis was completed.")
+
+    prompt = fake_llm.ainvoke.await_args.args[0]
+    assert "general roles/responsibilities" in prompt
+    assert "completed or cancelled work" in prompt
+    assert "conditional social suggestions" in prompt
+    assert "Never turn remembered personal facts into tasks" in prompt

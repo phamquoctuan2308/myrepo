@@ -1,6 +1,6 @@
 # Evaluation Evidence — Orbit
 
-Generated at `2026-08-25T13:25:12.177060+00:00` from source revision `367bb9d`
+Generated at `2026-08-26T07:48:37.633527+00:00` from source revision `8871730`
 with uncommitted evaluation changes.
 
 This report never converts missing evidence into a passing score. `PENDING` means the runner or
@@ -12,17 +12,17 @@ protocol exists but no current result artifact is available.
 |---|---:|---:|---|
 | Automated tests | 416/417 passed, 1 skipped | No failures/errors | PASS |
 | Source coverage | 67.9% | >=60% | PASS |
-| Formal Agent acceptance | 35.3% case pass | Dataset gates | FAIL |
+| Formal Agent acceptance | 100.0% case pass | Dataset gates | PASS |
 | Task title F1 | 91.9% | >=70% | PASS |
 | Deadline accuracy | 82.1% | >=70% | PASS |
-| RAGAS grounding | 55.0% faithfulness | All RAGAS gates | FAIL |
+| RAGAS grounding | 100.0% faithfulness | All RAGAS gates | PASS |
 | API latency P95 | Pending | Configured runner gate | PENDING |
 | User feedback | Pending | >=5 participants | PENDING |
 
 ## 2. Current measured AI quality
 
-- Formal acceptance: `2026-08-14T08:40:17.134794+00:00` using
-  `groq/openai/gpt-oss-20b`.
+- Formal acceptance: `2026-08-25T14:29:05.602046+00:00` using
+  `openai/gpt-5.6-luna`.
 - Task extraction: `37` cases; title precision
   `85.0%`, recall
   `100.0%`, F1 `91.9%`.

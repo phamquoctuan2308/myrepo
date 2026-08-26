@@ -45,6 +45,10 @@ logs/
 htmlcov/
 .coverage
 coverage.xml
+eval/results/*.junit.xml
+
+# Local task/test scratch space
+.tmp/
 
 # Docker
 docker-compose.override.yml

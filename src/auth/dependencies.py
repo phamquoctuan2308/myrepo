@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.security import decode_access_token
 from src.db.models import User
 from src.db.session import get_db
+from src.services.authorization_service import require_platform_admin as authorize_platform_admin
 
 security = HTTPBearer()
 
@@ -34,6 +35,8 @@ async def get_current_user(
 
 
 async def require_admin(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-    return current_user
+    return authorize_platform_admin(current_user)
+
+
+async def require_platform_admin(current_user: User = Depends(get_current_user)) -> User:
+    return authorize_platform_admin(current_user)

@@ -1,77 +1,106 @@
-"""Rate limiting (slowapi) - request burst/abuse protection, separate axis from
-`usage_service.is_over_budget()` (which caps $ cost across the whole app per day). In-memory
-storage is correct here: the app runs as a single uvicorn worker on a single Render instance
-(see Dockerfile CMD - no `--workers` flag), so there's no cross-process state to share and no
-need for Redis (consistent with the rest of the project - see ROADMAP.md).
+"""Small in-memory request limiter for the app's single-worker deployment."""
 
-Limits are applied per-route via `@limiter.limit(...)` decorators (auth endpoints, /chat) - see
-ROADMAP.md for the concrete tiers and rationale. Routes with neither a decorator nor
-`Depends(crud_rate_limit)` (health check, /chat/resume, /status) are never limited.
-
-NOT using slowapi's `Limiter(default_limits=[...])` + `SlowAPIMiddleware` auto-detection for the
-generic CRUD tier, even though that's slowapi's documented shortcut for "apply to everything else
-without decorating each route": on the FastAPI version this project pins (see requirements.txt),
-`app.include_router(...)` no longer flattens routes into `app.routes`, so `SlowAPIMiddleware`'s
-route-handler lookup (which walks `app.routes` directly) can't find any route registered through
-an included router and silently treats it as exempt - verified empirically, not a guess. The
-`crud_rate_limit` dependency below sidesteps that by using slowapi's per-call check (the same one
-`.limit(...)` uses internally) triggered through FastAPI's own `Depends()` resolution instead of
-middleware route lookup, which works regardless of that internal routing change.
-"""
+import asyncio
+import ipaddress
+import time
+from collections import defaultdict, deque
 
 import jwt
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from src.auth.security import decode_access_token
 from src.config import get_settings
 
-settings = get_settings()
+
+def _parse_limit(value: str) -> tuple[int, float]:
+    try:
+        count_text, period_text = value.strip().lower().split("/", 1)
+        seconds = {"second": 1.0, "minute": 60.0, "hour": 3600.0}[period_text.rstrip("s")]
+        count = int(count_text)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid rate limit {value!r}; expected e.g. '15/minute'") from exc
+    if count < 1:
+        raise ValueError("Rate limit count must be positive")
+    return count, seconds
 
 
-def user_or_ip_key(request: Request) -> str:
-    """Rate-limit key: the authenticated user's id when a valid Bearer token is present,
-    otherwise the client IP. Per-user keying matters for authenticated routes (/chat, CRUD) so
-    multiple legitimate users sharing an IP - NAT, same wifi, e.g. a group demo - don't share one
-    bucket; per-IP is the only option for unauthenticated routes (login/register/google), which is
-    exactly what this falls back to since they never carry a Bearer token.
+class RequestRateLimiter:
+    def __init__(self) -> None:
+        self.enabled = get_settings().rate_limit_enabled
+        self._hits: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+        self._lock = asyncio.Lock()
 
-    Decodes the JWT directly instead of depending on `get_current_user` - slowapi resolves the
-    rate-limit key in middleware, before FastAPI's own `Depends()` chain runs for the route, and
-    this is a cheap in-memory decode (no DB hit). An invalid/expired token here just falls back to
-    IP-keying; `get_current_user` still runs afterwards and 401s it as usual - this function only
-    ever chooses a bucket, it never authenticates anyone.
+    def reset(self) -> None:
+        self._hits.clear()
 
-    Real client IP is already correct behind Render's proxy: the Dockerfile CMD sets
-    `--proxy-headers --forwarded-allow-ips='*'` on uvicorn, which rewrites the ASGI scope's client
-    from X-Forwarded-For before the request reaches Starlette - get_remote_address needs no extra
-    configuration to see the real caller, not Render's edge IP.
-    """
-    auth_header = request.headers.get("authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header.removeprefix("Bearer ").strip()
-        try:
-            return f"user:{decode_access_token(token)}"
-        except jwt.PyJWTError:
-            pass
-    return f"ip:{get_remote_address(request)}"
+    @staticmethod
+    def _key(request: Request) -> str:
+        authorization = request.headers.get("authorization", "")
+        if authorization.startswith("Bearer "):
+            try:
+                return f"user:{decode_access_token(authorization.removeprefix('Bearer ').strip())}"
+            except (jwt.PyJWTError, KeyError):
+                pass
+        # Render's public edge overwrites CF-Connecting-IP, whereas X-Forwarded-For can contain
+        # caller-supplied entries. In production use the former for unauthenticated buckets and
+        # validate it before trusting it. Local/test traffic keeps using the socket client.
+        host = request.client.host if request.client else "unknown"
+        if get_settings().app_env == "production":
+            edge_ip = request.headers.get("cf-connecting-ip", "").strip()
+            try:
+                host = str(ipaddress.ip_address(edge_ip))
+            except ValueError:
+                host = "unknown"
+        return f"ip:{host}"
+
+    @staticmethod
+    def _tier(request: Request) -> tuple[str, str] | None:
+        settings = get_settings()
+        path = request.url.path.rstrip("/")
+        if request.method == "OPTIONS" or path == "/health" or not path.startswith("/api/v1"):
+            return None
+        if path in {"/api/v1/chat/resume", "/api/v1/chat/status"}:
+            return None
+        if path in {"/api/v1/auth/register", "/api/v1/auth/admin/register"}:
+            return "register", settings.rate_limit_register
+        if path in {"/api/v1/auth/login", "/api/v1/auth/google", "/api/v1/auth/admin/login"}:
+            return "auth", settings.rate_limit_auth
+        if path == "/api/v1/chat" and request.method == "POST":
+            return "chat", settings.rate_limit_chat
+        return "crud", settings.rate_limit_crud
+
+    async def check(self, request: Request) -> tuple[bool, int]:
+        tier = self._tier(request)
+        if not self.enabled or tier is None:
+            return True, 0
+        tier_name, configured_limit = tier
+        maximum, window = _parse_limit(configured_limit)
+        now = time.monotonic()
+        bucket_key = (tier_name, self._key(request))
+        async with self._lock:
+            hits = self._hits[bucket_key]
+            cutoff = now - window
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            if len(hits) >= maximum:
+                retry_after = max(1, int(window - (now - hits[0])))
+                return False, retry_after
+            hits.append(now)
+        return True, 0
 
 
-limiter = Limiter(key_func=user_or_ip_key, enabled=settings.rate_limit_enabled)
+request_limiter = RequestRateLimiter()
 
 
-@limiter.limit(settings.rate_limit_crud)
-async def crud_rate_limit(request: Request) -> None:
-    """Shared 'everything else' safety-net tier (see module docstring for why this is a
-    dependency instead of Limiter's usual default_limits). Add `Depends(crud_rate_limit)` to a
-    router's `dependencies=[...]` to cover every route in it with one line, no per-route
-    decoration needed - see reminder_routes.py/memory_routes.py/etc. for the pattern.
-
-    Do NOT add this to a router that also has its own per-route `@limiter.limit(...)` (e.g.
-    auth_routes.py's /register, /login, /google): slowapi marks a request as
-    "already rate-limited" the first time any check runs on it (`request.state.
-    _rate_limiting_complete`), so a router-level dependency would silently swallow a more specific
-    route decorator's own (different, usually stricter) limit if it ran first.
-    """
-    return None
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        allowed, retry_after = await request_limiter.check(request)
+        if not allowed:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded", "retry_after": retry_after},
+                headers={"Retry-After": str(retry_after)},
+            )
+        return await call_next(request)

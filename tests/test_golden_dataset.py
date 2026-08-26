@@ -3,7 +3,6 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-
 DATASET_PATH = Path(__file__).parents[1] / "eval" / "golden_dataset" / "cases.jsonl"
 EXPECTED_CATEGORIES = {"extraction", "routing", "permission", "prompt_injection", "hitl"}
 EXPECTED_ROUTES = {"employee", "manager", "executive", "clarify", "deny"}

@@ -1,35 +1,51 @@
 {
-  "run_at": "2026-08-25T13:23:36.192249+00:00",
+  "run_at": "2026-08-26T07:39:29.349755+00:00",
+  "source_revision": "8871730e699eae55dd9d814a02dcf87efb36906a",
+  "source_dirty": true,
   "dataset": "eval\\ragas\\conversation_summary_cases.jsonl",
   "case_count": 5,
   "application_model": "openai/gpt-5.6-luna",
   "evaluator_provider": "openrouter",
   "evaluator_model": "openai/gpt-5.6-luna",
   "embedding_model": "openai/text-embedding-3-small",
-  "stored_responses": false,
+  "answer_relevancy_prompt_language": "vietnamese",
+  "answer_relevancy_prompt_profile": "vietnamese-summary-v1",
+  "stored_responses": true,
+  "response_source": "eval\\results\\ragas-latest.json",
+  "partial_rerun": {
+    "enabled": true,
+    "case_ids": [
+      "summary-release-001",
+      "summary-calendar-004",
+      "summary-privacy-005"
+    ],
+    "metrics": [
+      "answer_relevancy"
+    ]
+  },
   "metrics": {
-    "faithfulness": 0.55,
-    "answer_relevancy": 0.428008,
-    "context_precision": 0.527778,
+    "faithfulness": 1.0,
+    "answer_relevancy": 0.879042,
+    "context_precision": 0.844444,
     "context_recall": 1.0
   },
   "release_gate": {
-    "passed": false,
+    "passed": true,
     "checks": {
       "faithfulness": {
-        "value": 0.55,
+        "value": 1.0,
         "threshold": 0.7,
-        "passed": false
+        "passed": true
       },
       "answer_relevancy": {
-        "value": 0.428008,
+        "value": 0.879042,
         "threshold": 0.7,
-        "passed": false
+        "passed": true
       },
       "context_precision": {
-        "value": 0.527778,
+        "value": 0.844444,
         "threshold": 0.6,
-        "passed": false
+        "passed": true
       },
       "context_recall": {
         "value": 1.0,
@@ -42,57 +58,99 @@
     {
       "case_id": "summary-release-001",
       "user_input": "Tóm tắt tình trạng phát hành và các blocker chính.",
-      "response": "Mục tiêu phát hành NovaCRM v1.0 vào thứ Sáu, ngày 4/9/2026. Migration staging đang bị chặn do email trùng và dự kiến được sửa trước 16:00 ngày 26/8/2026; smoke test còn lỗi Safari, timezone và thông báo gửi trùng. Nếu migration chưa ổn định, nhóm sẽ dời phát hành thay vì bỏ qua lỗi QA.",
+      "response": "tình trạng phát hành và các blocker chính: NovaCRM v1.0 mục tiêu phát hành vào thứ Sáu tuần sau, nhưng migration staging đang bị chặn vì email trùng; Lan sẽ sửa trước 16:00 ngày mai. Smoke test pass 32/35, còn lỗi Safari, timezone và notification gửi hai lần; nếu migration chưa ổn thì sẽ dời release và không bỏ qua lỗi QA.",
       "scores": {
-        "faithfulness": 0.75,
-        "answer_relevancy": 0.395167047417822,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.9099292313546269,
         "context_precision": 0.6388888888675925,
         "context_recall": 1.0
-      }
+      },
+      "answer_relevancy_audit": [
+        {
+          "question": "Tóm tắt tình trạng phát hành và các blocker chính.",
+          "noncommittal": 0
+        },
+        {
+          "question": "Tóm tắt tình trạng phát hành và các blocker chính của NovaCRM v1.0.",
+          "noncommittal": 0
+        },
+        {
+          "question": "Tóm tắt tình trạng phát hành và các blocker chính.",
+          "noncommittal": 0
+        }
+      ]
     },
     {
       "case_id": "summary-task-002",
       "user_input": "Tóm tắt công việc, người phụ trách và deadline.",
-      "response": "Huy sẽ hoàn thiện dashboard responsive trước 17:00 thứ Tư, ngày 26/08/2026. Lan xác nhận contract `revenue_today` trước 11:00 thứ Ba, ngày 25/08/2026; Mai sẽ chạy regression sau khi staging được deploy.",
+      "response": "công việc, người phụ trách và deadline: Huy phụ trách hoàn thiện responsive dashboard trước 17:00 thứ Tư. Lan phụ trách xác nhận contract revenue_today trước 11:00 hôm nay; Mai sẽ chạy regression sau khi deploy staging.",
       "scores": {
-        "faithfulness": 0.3333333333333333,
-        "answer_relevancy": 0.518415905993198,
-        "context_precision": 0.3333333333,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.7158166643565194,
+        "context_precision": 0.9999999999666667,
         "context_recall": 1.0
       }
     },
     {
       "case_id": "summary-decision-003",
       "user_input": "Nhóm đã quyết định gì về schema và go/no-go?",
-      "response": "Nhóm chốt freeze schema vào 15:00 thứ Tư, ngày 26/08/2026. Cuộc họp go/no-go vẫn diễn ra lúc 16:30 thứ Năm, ngày 27/08/2026; sau thời điểm freeze, mọi thay đổi schema cần được phê duyệt.",
+      "response": "Nhóm quyết định freeze schema lúc 15:00 thứ Tư và không thay đổi schema sau thời điểm freeze nếu chưa có phê duyệt. Go/no-go vẫn diễn ra lúc 16:30 thứ Năm.",
       "scores": {
-        "faithfulness": 0.3333333333333333,
-        "answer_relevancy": 0.6998074230532905,
-        "context_precision": 0.49999999995,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.7694626683605157,
+        "context_precision": 0.99999999995,
         "context_recall": 1.0
       }
     },
     {
       "case_id": "summary-calendar-004",
       "user_input": "Tóm tắt lịch họp và những gì còn thiếu.",
-      "response": "An đề nghị đặt lịch review kiến trúc vào 10:00 sáng thứ Tư, ngày 26/08/2026. Bình xác nhận có thể tham gia, còn An sẽ bổ sung phòng họp trước cuối ngày 25/08/2026.",
+      "response": "lịch họp và những gì còn thiếu: Buổi review kiến trúc được lên lịch lúc 10:00 sáng mai. Phòng họp chưa được cung cấp; An sẽ bổ sung trước cuối ngày.",
       "scores": {
-        "faithfulness": 0.3333333333333333,
-        "answer_relevancy": 0.3009289504570377,
-        "context_precision": 0.8333333332916666,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.9999992406800139,
+        "context_precision": 0.5833333333041666,
         "context_recall": 1.0
-      }
+      },
+      "answer_relevancy_audit": [
+        {
+          "question": "Tóm tắt lịch họp và những gì còn thiếu.",
+          "noncommittal": 0
+        },
+        {
+          "question": "Tóm tắt lịch họp và những gì còn thiếu.",
+          "noncommittal": 0
+        },
+        {
+          "question": "Tóm tắt lịch họp và những gì còn thiếu.",
+          "noncommittal": 0
+        }
+      ]
     },
     {
       "case_id": "summary-privacy-005",
       "user_input": "Tóm tắt các thông tin được phép trong phạm vi hội thoại này.",
-      "response": "Lan thích nhận bản tóm tắt dạng gạch đầu dòng. Trong dự án, Huy là người review frontend chính và API key không được lưu vào memory.",
+      "response": "các thông tin được phép trong phạm vi hội thoại này: Lan thích nhận bản tóm tắt dạng gạch đầu dòng. Trong dự án này, Huy là người review frontend chính; API key không được lưu vào memory.",
       "scores": {
         "faithfulness": 1.0,
-        "answer_relevancy": 0.22571923326766788,
-        "context_precision": 0.3333333333,
+        "answer_relevancy": 1.0,
+        "context_precision": 0.9999999999666667,
         "context_recall": 1.0
-      }
+      },
+      "answer_relevancy_audit": [
+        {
+          "question": "Tóm tắt các thông tin được phép trong phạm vi hội thoại này.",
+          "noncommittal": 0
+        },
+        {
+          "question": "Tóm tắt các thông tin được phép trong phạm vi hội thoại này.",
+          "noncommittal": 0
+        },
+        {
+          "question": "Tóm tắt các thông tin được phép trong phạm vi hội thoại này.",
+          "noncommittal": 0
+        }
+      ]
     }
   ]
 }

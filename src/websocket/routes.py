@@ -2,11 +2,13 @@ import asyncio
 
 import jwt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import HTTPException
 
-from src.auth.security import decode_access_token
+from src.auth.security import decode_websocket_ticket
 from src.db import session as db_session
 from src.db.models import User
-from src.services import chat_service, proactive_service
+from src.services import chat_service, event_extraction_service, proactive_service
+from src.services.authorization_service import require_conversation_access
 from src.websocket.manager import manager
 
 router = APIRouter()
@@ -25,19 +27,19 @@ def _run_in_background(coro) -> None:
 
 @router.websocket("/ws")
 async def chat_websocket(websocket: WebSocket) -> None:
-    token = websocket.query_params.get("token")
-    if not token:
+    ticket = websocket.query_params.get("ticket")
+    if not ticket:
         await websocket.close(code=4001)
         return
     try:
-        user_id = decode_access_token(token)
+        user_id = decode_websocket_ticket(ticket)
     except jwt.PyJWTError:
         await websocket.close(code=4001)
         return
 
     async with db_session.async_session_maker() as db:
         user = await db.get(User, user_id)
-        if user is None:
+        if user is None or not user.is_active:
             await websocket.close(code=4001)
             return
 
@@ -56,14 +58,23 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 continue
 
             async with db_session.async_session_maker() as db:
+                current_user = await db.get(User, user_id)
                 try:
-                    await chat_service.assert_participant(db, conversation_id, user_id)
-                except Exception:
-                    await websocket.send_json({"type": "error", "detail": "Not a participant of this conversation"})
+                    if current_user is None:
+                        raise HTTPException(status_code=403, detail="Account has been disabled")
+                    await require_conversation_access(db, current_user, conversation_id, "participant")
+                except (HTTPException, ValueError):
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "code": "conversation_access_denied",
+                            "detail": "Conversation access denied",
+                        }
+                    )
                     continue
 
                 message = await chat_service.create_message(db, conversation_id, user_id, content)
-                sender = await db.get(User, user_id)
+                sender = current_user
                 message_out = chat_service.serialize_message(message, sender)
                 participant_ids = await chat_service.get_participant_ids(db, conversation_id)
 
@@ -72,7 +83,16 @@ async def chat_websocket(websocket: WebSocket) -> None:
             )
             _run_in_background(
                 proactive_service.maybe_suggest_task(
-                    conversation_id=conversation_id, sender_id=user_id, content=content
+                    conversation_id=conversation_id,
+                    sender_id=user_id,
+                    content=content,
+                    message_id=message.id,
+                )
+            )
+            _run_in_background(
+                event_extraction_service.maybe_extract_event_candidate(
+                    conversation_id=conversation_id,
+                    message_id=message.id,
                 )
             )
     except WebSocketDisconnect:

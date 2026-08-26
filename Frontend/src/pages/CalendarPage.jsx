@@ -1,15 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
-// Required for the `timeZone="Asia/Ho_Chi_Minh"` prop below to actually convert event times for
-// display - without this plugin, FullCalendar only knows how to display 'local' (the viewer's
-// own machine/browser zone) or 'UTC' correctly; any other named IANA zone is silently NOT
-// converted, so every event rendered exactly at its raw UTC clock digits (e.g. a 9am Vietnam
-// event stored as "...T02:00:00Z" showed as "2am" instead of "9am").
-import momentTimezonePlugin from '@fullcalendar/moment-timezone'
 import PageHeader from '../components/common/PageHeader'
 import NewEventModal from '../components/calendar/NewEventModal'
 import ConnectCalendarCard from '../components/calendar/ConnectCalendarCard'
@@ -26,51 +20,31 @@ export default function CalendarPage() {
   const { subscribe } = useOutletContext()
   const [connected, setConnected] = useState(null) // null = not checked yet
   const [events, setEvents] = useState([])
-  const [checkingConnection, setCheckingConnection] = useState(true) // initial "are we connected at all" check
-  const [eventsLoading, setEventsLoading] = useState(false) // a refresh() in flight - never unmounts FullCalendar
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(null)
   const [newEventOpen, setNewEventOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
-  // Range actually visible in the calendar grid right now - null until FullCalendar has mounted
-  // and reported it via onDatesSet. Kept in a ref (not state) purely so refresh() called from
-  // elsewhere (disconnect/reconnect, "New event") can reuse the last-known range without also
-  // needing to be in that effect's dependency list.
-  const visibleRange = useRef(null)
-
   const refresh = () => {
-    setEventsLoading(true); setError('')
-    listCalendarEvents(token, visibleRange.current || {})
+    setLoading(true); setError('')
+    listCalendarEvents(token)
       .then(list => { setConnected(true); setEvents(list.map(e => ({ ...e, color: getColor(e.id) }))) })
       .catch(err => {
         if (err.status === 409) { setConnected(false); setEvents([]) } // not connected, not an error
         else setError(err.detail?.message || err.detail || 'Could not load Google Calendar events.')
       })
-      .finally(() => setEventsLoading(false))
-  }
-
-  // Fires on mount AND on every prev/next/today/view-switch - without this, /calendar/events'
-  // default range (now -> +60 days, see calendar_routes.py) means events earlier in the CURRENTLY
-  // VISIBLE month (e.g. anything before "right now" today) never load at all, even though they're
-  // sitting right there in the grid. Refetching with the grid's actual boundaries each time fixes
-  // that for every view, not just the initial month.
-  //
-  // Deliberately NOT gated behind eventsLoading/checkingConnection anywhere in JSX below - if
-  // rendering FullCalendar itself depended on a loading flag that only this callback clears,
-  // FullCalendar could never mount to fire it in the first place (a real deadlock this page had
-  // for a moment: stuck on "Loading calendar..." forever).
-  const onDatesSet = (arg) => {
-    visibleRange.current = { time_min: arg.start.toISOString(), time_max: arg.end.toISOString() }
-    refresh()
+      .finally(() => setLoading(false))
   }
 
   useEffect(() => {
-    setCheckingConnection(true)
+    setLoading(true)
     getCalendarConnection(token)
-      .then(({ connected: isConnected }) => setConnected(isConnected))
-      .catch(() => {})
-      .finally(() => setCheckingConnection(false))
+      .then(({ connected: isConnected }) => {
+        if (isConnected) refresh()
+        else { setConnected(false); setLoading(false) }
+      })
+      .catch(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
@@ -116,13 +90,10 @@ export default function CalendarPage() {
   return <div className="page-container calendar-page">
     <PageHeader eyebrow="Schedule" title="Calendar" description="Your Google Calendar events, all in one place." action={headerAction}/>
     {error && <div className="auth-error mb-3">{error}</div>}
-    {checkingConnection ? <p className="text-muted small">Loading calendar...</p> : connected === false ? (
-      <ConnectCalendarCard onConnected={() => setConnected(true)} />
+    {loading ? <p className="text-muted small">Loading calendar...</p> : connected === false ? (
+      <ConnectCalendarCard onConnected={() => { setConnected(true); refresh() }} />
     ) : (
-      <div className="calendar-layout"><section className="content-card calendar-card">
-        {eventsLoading && <p className="text-muted small mb-2">Refreshing...</p>}
-        <FullCalendar plugins={[dayGridPlugin,timeGridPlugin,interactionPlugin,momentTimezonePlugin]} initialView="dayGridMonth" timeZone={HANOI_TZ} headerToolbar={{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,timeGridDay'}} events={events} eventClick={(info)=>{ info.jsEvent.preventDefault(); setSelected(info.event) }} datesSet={onDatesSet} height="auto"/>
-      </section>
+      <div className="calendar-layout"><section className="content-card calendar-card"><FullCalendar plugins={[dayGridPlugin,timeGridPlugin,interactionPlugin]} initialView="dayGridMonth" timeZone={HANOI_TZ} headerToolbar={{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,timeGridDay'}} events={events} eventClick={({event:e})=>setSelected(e)} height="auto"/></section>
         <aside className="detected-sidebar"><div className="detected-head"><span><i className="bi bi-stars"/></span><div><h3>AI-detected events</h3><p>Active</p></div></div><p className="text-muted small">Orbit đang tự động rà tin nhắn tìm cam kết/lịch hẹn. Khi phát hiện, việc gợi ý sẽ xuất hiện trong <Link to="/tasks">Tasks → AI suggestions</Link> để bạn Accept/Dismiss trước khi tạo event thật.</p></aside>
       </div>
     )}
