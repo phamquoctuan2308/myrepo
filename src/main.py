@@ -38,10 +38,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-# The WebSocket endpoint takes its JWT as a `?token=` query parameter (src/websocket/routes.py) -
-# without this, uvicorn's own access/error log lines print that token in plaintext on every
-# connection attempt, accepted or rejected.
-install_sensitive_log_filter()
 
 
 @asynccontextmanager

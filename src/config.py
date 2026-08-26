@@ -68,13 +68,6 @@ class Settings(BaseSettings):
     db_max_overflow: int = Field(default=20, ge=0, le=200)
     db_pool_timeout_seconds: int = Field(default=30, ge=1, le=300)
 
-    @field_validator("database_url")
-    @classmethod
-    def validate_postgres_url(cls, value: str) -> str:
-        if not value.startswith(("postgresql://", "postgresql+asyncpg://")):
-            raise ValueError("DATABASE_URL must be a PostgreSQL connection URL")
-        return value
-
     # Auth
     secret_key: str = "dev-insecure-secret-change-me"
     jwt_algorithm: str = "HS256"

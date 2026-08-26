@@ -325,7 +325,7 @@ async def _poll_one_user(user_id: str) -> None:
 
     for event in items:
         if event.get("status") == "cancelled":
-            await notify_event_deleted(user_id, event["id"])
+            await broadcast_change(user_id, "calendar_event_deleted", {"event_id": event["id"]})
         else:
             await broadcast_change(user_id, "calendar_event_updated", {"event": to_out_dict(event)})
     await google_credentials.set_sync_token(user_id, next_sync_token)

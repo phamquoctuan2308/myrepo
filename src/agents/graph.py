@@ -13,19 +13,11 @@ from src.agents.tools import ALL_TOOLS
 from src.config import get_settings
 
 # Tools whose own output is already the final answer - no confirmation needed and no benefit
-# from a second LLM pass to "relay" it. Routing straight to output_guardrail after these avoids
-# that second planner pass, which some models handle poorly (observed: hallucinating a bogus
-# repeat tool-call instead of plain text). Calendar/reminder tools still go back through planner -
-# their raw output isn't user-facing prose, and human-in-the-loop confirmation flows need that turn.
+# from a second LLM pass to "relay" it. Routing straight to END after these avoids that second
+# pass, which some models handle poorly (observed: hallucinating a bogus repeat tool-call instead
+# of plain text). Calendar/reminder tools still go back through planner - their raw output isn't
+# user-facing prose, and human-in-the-loop confirmation flows need that turn.
 TERMINAL_TOOLS = {"summarize_conversation", "extract_tasks"}
-
-
-def route_after_input_guardrail(state: AgentState) -> str:
-    """A blocked or clarification-needed request ends the run right here - no tokens spent on the
-    planner, no tool ever sees a rejected/unclear request."""
-    if state.get("guardrail_blocked") or state.get("guardrail_requires_clarification"):
-        return END
-    return "context_builder"
 
 
 def route_after_planner(state: AgentState) -> str:
@@ -41,8 +33,8 @@ def route_after_input_guardrail(state: AgentState) -> str:
 
 
 def route_after_tools(state: AgentState) -> str:
-    """Send a terminal tool's output through output validation (it's the final answer);
-    otherwise loop back to the planner so it can phrase a reply or decide on further tool calls."""
+    """End immediately after a terminal tool (its output is the final answer); otherwise loop
+    back to the planner so it can phrase a reply or decide on further tool calls."""
     last = state["messages"][-1]
     if isinstance(last, ToolMessage) and last.name in TERMINAL_TOOLS:
         return "output_guardrail"
@@ -107,9 +99,7 @@ async def init_checkpointer() -> None:
 
     scheme, _, rest = _settings.database_url.partition("://")
     conninfo = f"{scheme.split('+')[0]}://{rest}"
-    # max_size kept small - this pool shares a managed Postgres pooler's total-client budget
-    # (e.g. Supabase Session pooler caps ~15) with session.py's engine and scheduler.py's jobstore.
-    pool = AsyncConnectionPool(conninfo=conninfo, min_size=1, max_size=4, open=False, kwargs={"autocommit": True})
+    pool = AsyncConnectionPool(conninfo=conninfo, max_size=10, open=False, kwargs={"autocommit": True})
     await pool.open()
     saver = AsyncPostgresSaver(pool)
     await saver.setup()
