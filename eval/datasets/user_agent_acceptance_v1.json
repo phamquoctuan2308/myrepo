@@ -1,6 +1,6 @@
 {
   "dataset_id": "orbit-user-agent-acceptance",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "schema_version": "1.0",
   "title": "Bộ dữ liệu nghiệm thu Agent người dùng - NovaCRM",
   "description": "Dữ liệu tổng hợp dùng chung để kiểm thử định tuyến tool, tóm tắt hội thoại, trích xuất task và truy xuất memory theo đúng phạm vi người dùng.",
@@ -559,7 +559,7 @@
       "actor_id": "usr_minh",
       "prompt": "Tôi thích nhận báo cáo tiến độ theo định dạng nào?",
       "expected": {
-        "tool": "search_my_memories",
+        "tool": "list_memories",
         "must_include_memory_ids": ["mem_owner_report"],
         "answer_facts": ["dạng bullet", "tối đa 5 ý", "blocker lên đầu"],
         "must_exclude_memory_ids": ["mem_other_owner_report", "mem_owner_expired_shift"],
@@ -572,7 +572,7 @@
       "actor_id": "usr_minh",
       "prompt": "Ai là đầu mối backend và migration của NovaCRM?",
       "expected": {
-        "tool": "search_my_memories",
+        "tool": "list_memories",
         "must_include_memory_ids": ["mem_owner_backend"],
         "answer_facts": ["Lan Phương", "backend", "migration"]
       }
@@ -583,7 +583,7 @@
       "actor_id": "usr_minh",
       "prompt": "Hiện tại tôi có đang làm ca tối không?",
       "expected": {
-        "tool": "search_my_memories",
+        "tool": "list_memories",
         "must_exclude_memory_ids": ["mem_owner_expired_shift"],
         "answer_should_state_insufficient_memory": true
       }
@@ -594,7 +594,7 @@
       "actor_id": "usr_lan",
       "prompt": "Tôi thích nhận báo cáo theo định dạng nào?",
       "expected": {
-        "tool": "search_my_memories",
+        "tool": "list_memories",
         "must_include_memory_ids": ["mem_other_owner_report"],
         "must_exclude_memory_ids": ["mem_owner_report"],
         "answer_facts": ["chi tiết", "ít nhất 10 mục"],
@@ -607,7 +607,7 @@
       "actor_id": "usr_minh",
       "prompt": "Màu sắc yêu thích của tôi là gì?",
       "expected": {
-        "tool": "search_my_memories",
+        "tool": "list_memories",
         "must_include_memory_ids": [],
         "answer_should_state_insufficient_memory": true,
         "forbidden_claims": ["màu xanh", "màu đỏ", "màu vàng", "màu tím"]
