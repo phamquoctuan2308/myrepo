@@ -1,9 +1,9 @@
 # Roadmap — hoàn thiện "AI Agent Trợ lý cá nhân trong Chat" theo đề bài
 
-Đề bài gốc: [Frontend/detai.md](Frontend/detai.md). Kiến trúc/quyết định công nghệ chi tiết:
-[ARCHITECTURE.md](ARCHITECTURE.md). Nhật ký chi tiết từng thay đổi: [WORKLOG.md](WORKLOG.md). Tài
-liệu này chỉ theo dõi **tiến độ theo yêu cầu đề bài** — cập nhật trạng thái mỗi khi một mục hoàn
-thành.
+Đề bài gốc: [Frontend/detai.md](Frontend/detai.md). Cách tiếp cận / mindset / metric:
+[SOLUTION.md](SOLUTION.md). Kiến trúc/quyết định công nghệ chi tiết: [ARCHITECTURE.md](ARCHITECTURE.md).
+Nhật ký chi tiết từng thay đổi: [WORKLOG.md](WORKLOG.md). Tài liệu này chỉ theo dõi **tiến độ theo
+yêu cầu đề bài** — cập nhật trạng thái mỗi khi một mục hoàn thành.
 
 ## Bảng hiện trạng (gap analysis)
 

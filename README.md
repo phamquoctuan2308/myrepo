@@ -258,6 +258,7 @@ Docker Compose hiện chỉ chạy backend tại cổng `8000`; frontend chạy 
 
 ## Tài liệu khác
 
+- [SOLUTION.md](SOLUTION.md) — **cách nhóm đọc đề, mindset thiết kế, giải pháp, và metric cho bài toán** (gộp vấn đề → nguyên tắc → giải pháp → số đo → kết quả → future work).
 - [CLAUDE.md](CLAUDE.md) — hướng dẫn chi tiết cho AI coding assistant làm việc trong repo này (quy ước code, lệnh chạy đầy đủ).
 - [Frontend/README.md](Frontend/README.md) — hướng dẫn riêng cho frontend (cấu trúc, xử lý lỗi thường gặp khi chạy npm trên Windows).
 - [Frontend/detai.md](Frontend/detai.md) — đề bài / yêu cầu gốc của dự án.

@@ -328,3 +328,21 @@ Chỉ CSS trong `@media`, layout desktop (grid 3–4 cột) không đổi:
   (`#basic`/`#preferences`/`#notifications`/`#ai`/`#security`) không có đích để cuộn tới. Truyền
   `id` cho cả 5 section, thêm `scroll-margin-top: calc(var(--topbar) + 20px)` + `scroll-behavior:
   smooth` để nhảy mục không bị topbar dính đè.
+
+## 2026-08-29 — Doc: SOLUTION.md (phản hồi mentor review)
+
+> Mentor review: doc cần thể hiện rõ **solution + mindset trong bài toán + metric cho bài toán**;
+> multi-agent chỉ là future work, không phải nội dung nộp lần này.
+
+- Thêm [SOLUTION.md](SOLUTION.md) ở gốc repo — một mạch đọc duy nhất: bài toán & cách nhóm đọc đề
+  (4 ràng buộc + cách diễn giải từng cái) → 8 nguyên tắc thiết kế (mindset) kèm nơi hiện trong code
+  → giải pháp (kiến trúc + bảng "vì sao lệch tech stack gợi ý") → metric (north-star + bảng *mỗi
+  ràng buộc → metric → gate → kết quả đo gần nhất → nguồn*) → kết quả so với đề bài → hạn chế đã
+  biết → future work (multi-agent + 6 hướng khác).
+- Số liệu lấy nguyên từ artifact có sẵn, không chạy lại eval: `eval/EVALUATION_EVIDENCE.md`
+  (416/417 test, coverage 67.9%, task F1 91.9%, deadline 82.1%, RAGAS faithfulness 100%),
+  `eval/results/agent_acceptance_latest.md` (100% case pass, HITL side-effect 0%, memory isolation
+  100%, latency p50 3.25s/p95 12.7s), `metric.md` (khung + gate). Các mục `PENDING` (latency P95
+  trên môi trường target, user feedback ≥5 người) giữ nguyên là PENDING, không quy đổi thành pass.
+- Nối liên kết: mục "Tài liệu khác" trong `README.md` và header `ROADMAP.md` trỏ tới `SOLUTION.md`.
+  Không sửa bộ `docs/` (đang là canonical cho multi-agent, để nguyên làm nguồn cho phần future work).
