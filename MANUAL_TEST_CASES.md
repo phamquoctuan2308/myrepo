@@ -1,6 +1,6 @@
 # Manual Test Cases — Orbit AI Assistant
 
-Tài liệu gồm 10 test case thủ công, chia đều theo 5 nhóm chức năng chính của hệ thống. Các mốc thời gian hiển thị được kiểm tra theo múi giờ `Asia/Ho_Chi_Minh`.
+Tài liệu gồm 11 test case thủ công theo 5 nhóm chức năng chính của hệ thống. Các mốc thời gian hiển thị được kiểm tra theo múi giờ `Asia/Ho_Chi_Minh`.
 
 ## Chuẩn bị chung
 
@@ -62,6 +62,20 @@ Tài liệu gồm 10 test case thủ công, chia đều theo 5 nhóm chức năn
 | 1 | User A tạo nhóm và chỉ thêm User B. | Nhóm được tạo, danh sách thành viên chỉ gồm A và B. |
 | 2 | User A gửi tin nhắn vào nhóm. | User B nhận tin realtime và thấy đúng tên nhóm/nội dung. |
 | 3 | Kiểm tra màn hình và API bằng phiên của User C. | User C không thấy nhóm, không nhận WebSocket event của nhóm và không đọc được lịch sử nhóm. |
+
+### TC-CHAT-03 — Đính kèm file, emoji và ô soạn tin tự giãn
+
+**Tiền điều kiện:** User A và User B có hội thoại 1-1; cả hai đang mở hội thoại đó.
+
+| Bước | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| 1 | User A bấm icon kẹp giấy ở ô soạn tin, chọn 1 ảnh (< 3 MB) và 1 file không phải ảnh. | Hai chip đính kèm hiện phía trên ô soạn tin; chip ảnh có thumbnail, mỗi chip có nút xoá. |
+| 2 | User A thử chọn thêm để vượt quá 5 file, và chọn một file > 3 MB. | File > 3 MB bị bỏ qua; tổng số đính kèm không vượt quá 5. |
+| 3 | User A bấm icon mặt cười và chọn một emoji. | Emoji được chèn vào cuối nội dung đang soạn. |
+| 4 | User A gửi tin nhắn. | Ảnh hiển thị inline trong bong bóng của A; file khác hiển thị dạng link tải. Ô soạn tin trở về rỗng và cao 1 dòng. |
+| 5 | Quan sát màn hình User B (không tải lại trang). | B nhận tin realtime với cùng ảnh inline và link tải, không phải chuỗi `[[orbit-attachment]]` thô. |
+| 6 | User A dán/gõ một đoạn văn bản dài nhiều dòng vào ô soạn tin. | Ô soạn tin tự cao dần theo nội dung tới trần ~120px rồi mới xuất hiện thanh cuộn; nút gửi vẫn nhìn thấy. |
+| 7 | (Tuỳ chọn) Thu nhỏ cửa sổ xuống cỡ điện thoại rồi lặp lại bước 1–6. | Bố cục `/chat` không vỡ: bong bóng không tràn mép phải, panel AI mở dạng tấm phủ toàn màn hình, ô soạn tin không bị bàn phím ảo che. |
 
 ---
 

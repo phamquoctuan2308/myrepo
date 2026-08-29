@@ -257,3 +257,74 @@ the REST endpoint as the sender, confirmed the recipient's live socket actually 
 `new_message` event (no refresh). Cleaned up the test rows afterward. `ruff check` clean;
 `tests/test_websocket.py` + `tests/test_chat.py` + `tests/test_admin.py` green immediately after
 the change, full `pytest tests/ -v` re-run afterward (see below).
+
+## 2026-08-28 — Chat/Assistant: đính kèm file + emoji, composer tự giãn, layout điện thoại, sửa nav Profile
+
+> Ghi bổ sung từ commit trên nhánh `tuan` (`2e78238`..`f7b1108`, không phải nhật ký viết ngay lúc
+> làm) — mốc gần nhất trước đó trong file này là 2026-08-22, giữa hai mốc còn nhiều việc khác của
+> cả nhóm chưa ghi ở đây. Toàn bộ thay đổi bên dưới là frontend `Frontend/user/`, trừ đúng 1 dòng
+> schema backend ở mục đính kèm. **Chưa chạy lại `npm run build` / `pytest` trong lượt cập nhật
+> tài liệu này** — cần build `Frontend/user` và click thử `/chat`, `/assistant`, `/profile` trên
+> viewport điện thoại + desktop trước khi coi là verified.
+
+### Đính kèm file + emoji trong khung chat `/chat` (Nguyễn Văn Tân)
+
+- Nút kẹp giấy (`bi-paperclip`) trong composer `MessageArea.jsx`: chọn tối đa 5 file, mỗi file
+  ≤ 3 MB (`file.size <= 3 * 1024 * 1024`), đọc bằng `FileReader` thành data URL ngay ở client. File
+  ảnh hiện thumbnail preview trong chip đính kèm; file khác hiện icon + tên + nút ×.
+- **Không có endpoint upload / storage riêng**: đính kèm được nhúng thẳng vào `content` của tin
+  nhắn dưới dạng các dòng `[[orbit-attachment]]{json}` (`name`/`type`/`size`/`dataUrl`), nối sau
+  phần text người dùng gõ. `MessageBubble.jsx` thêm `renderContent()` parse marker này khi hiển
+  thị: ảnh (`type` bắt đầu `image/` + có `dataUrl`) render inline `<img>`, file khác render icon
+  `bi-file-earmark` + link `<a href={dataUrl} download={name}>`.
+- Backend: `SendMessageRequest.content` (`src/models/chat_schemas.py`) nới `max_length` 5_000 →
+  5_000_000 để chứa base64 data URL — thay đổi backend duy nhất của đợt này.
+- Nút emoji (`bi-emoji-smile`) mở bảng 16 emoji, `addEmoji()` chèn vào cuối draft.
+- Giới hạn đã biết: data URL đi qua đúng đường lưu `messages.content` nên đính kèm lớn làm phình
+  row DB và payload WebSocket broadcast; chưa có kiểm MIME / quét virus phía server;
+  `[[orbit-attachment]]` chỉ là quy ước client — tin nhắn cũ hoặc client khác gửi text chứa đúng
+  chuỗi đó sẽ bị render nhầm thành đính kèm.
+- `076c9e5` sửa nhầm lẫn định dạng nhãn đính kèm ở bản nháp trước đó (emoji literal lọt vào chuỗi
+  JS) trước khi chốt sang marker JSON ở `f7b1108`.
+
+### Composer tự giãn theo nội dung (Phạm Quốc Tuấn)
+
+- Ô nhập `/chat` (`MessageArea.jsx`) đổi từ `<input>` sang `<textarea rows="1">` tự cao dần theo
+  nội dung, trần 120px (`onInput` → `field.style.height = min(scrollHeight, 120)px`); `/assistant`
+  (`PersonalAIChat.jsx`) áp cùng helper `resizeComposer`. Enter gửi, Shift+Enter xuống dòng giữ
+  nguyên.
+
+### Dọn composer `/assistant` (Phạm Quốc Tuấn)
+
+- Bỏ nút micro giả lập khỏi `PersonalAIChat.jsx` (`5c0f6a8`) — placeholder "listening" + vòng
+  `animate-ping` reuse `sending` state, không có luồng thu âm thật nên gây hiểu nhầm.
+- Ẩn thanh cuộn của composer `/assistant` (`43cf715`, `assistant.css`); `40ad6ce` sửa nút đóng
+  panel trên mobile.
+
+### `/chat` và `/assistant` chạy được trên điện thoại thật (Phạm Quốc Tuấn)
+
+Chỉ CSS trong `@media`, layout desktop (grid 3–4 cột) không đổi:
+
+- **AI panel `/chat`** (`a3f7947`) và **context panel `/assistant`** (`def0bf3`) ở ≤ 1200px chuyển
+  thành tấm phủ toàn khung `position:absolute; inset:0`, mờ đục hoàn toàn, trượt từ phải — trước đó
+  drawer bị lệch (do `.orbit-fx .ai-panel{position:relative}` đè media query, và do transform
+  Framer Motion còn lại trên layout gốc), để lọt message list phía sau và chặn nút Back.
+- `≤ 768px` (`4bfbcfa`/`def0bf3`): `100dvh` thay `100vh` (giữ `100vh` fallback), `min-width:0` dọc
+  chuỗi flex, `overflow-wrap:anywhere` cho bong bóng, `env(safe-area-inset-bottom)` cho composer.
+- Bàn phím ảo (`8eb4f6b`): font composer 16px ở ≤ 768px (chặn iOS Safari auto-zoom đẩy nút gửi ra
+  ngoài), thêm `interactive-widget=resizes-content` vào viewport meta (`index.html`) để bàn phím co
+  layout viewport thay vì che composer.
+- `/chat` trên điện thoại: mở tab Chat rơi vào **danh sách hội thoại**, không auto-mở
+  `conversations[0]` (`a8ec1bd`, guard `matchMedia`; desktop giữ list + pane cạnh nhau); danh sách
+  hội thoại style kiểu Messenger (`2e78238`: nền gần đen, avatar tròn 52px, bỏ viền/card, ẩn
+  subtitle "N conversations" và toggle quyền AI theo hàng — vẫn cấp quyền AI được từ trong thread);
+  header hội thoại rút gọn còn back / avatar / tên / sao AI / menu (`5d724bf`: bỏ nút gọi
+  thoại–video placeholder và pill "AI active").
+
+### Sửa điều hướng mục trong `/profile` (Nguyễn Văn Tân, `074f011`)
+
+- `ProfilePage.jsx` không truyền `id` cho `SettingsSection` (component đã nhận sẵn prop `id` và
+  render ra `<section id>`), nên các link neo ở sidebar hồ sơ
+  (`#basic`/`#preferences`/`#notifications`/`#ai`/`#security`) không có đích để cuộn tới. Truyền
+  `id` cho cả 5 section, thêm `scroll-margin-top: calc(var(--topbar) + 20px)` + `scroll-behavior:
+  smooth` để nhảy mục không bị topbar dính đè.

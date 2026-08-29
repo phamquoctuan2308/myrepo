@@ -50,7 +50,7 @@ cho phép trong test.
 | Khu vực | Chức năng chính |
 | --- | --- |
 | `/assistant` | Chat trực tiếp với agent; xác nhận hoặc từ chối hành động có tác dụng phụ |
-| `/chat` | Chat 1-1/nhóm realtime, lịch sử tin nhắn, quyền cho AI đọc từng hội thoại |
+| `/chat` | Chat 1-1/nhóm realtime, lịch sử tin nhắn, quyền cho AI đọc từng hội thoại, đính kèm file + emoji trong ô soạn tin, layout responsive cho điện thoại |
 | `/tasks` | Tạo/quản lý task, nhận gợi ý do AI phát hiện hoặc trích xuất |
 | `/tasks/inbox` | Gom task cần quyết định, quá hạn, sắp đến hạn và ưu tiên cao |
 | `/calendar` | Kết nối Google Calendar riêng từng user; xem/tạo/sửa/xóa event |
@@ -69,6 +69,13 @@ cho phép trong test.
 
 Admin là vai trò vận hành nền tảng, **không có quyền mặc định đọc nội dung hội thoại**. Quyền đọc
 hội thoại chỉ đến từ participant đang hoạt động trong chính hội thoại đó.
+
+> **Cập nhật 2026-08-28 (nhánh `tuan`):** ô soạn tin `/chat` tự giãn theo nội dung, thêm bảng emoji
+> và đính kèm file — file đọc thành data URL ở client (≤ 3 MB/file, tối đa 5) và nhúng thẳng vào
+> `messages.content` dưới dạng dòng `[[orbit-attachment]]{json}`; không thêm bảng hay endpoint
+> lưu trữ, `SendMessageRequest.content` chỉ nới `max_length` lên 5_000_000. `/chat` và `/assistant`
+> có nhánh CSS `@media` riêng cho điện thoại (danh sách hội thoại kiểu Messenger, panel AI/context
+> dạng tấm phủ toàn màn hình, xử lý bàn phím ảo). Mô hình dữ liệu ở mục 5 không đổi.
 
 ## 4. Các luồng quan trọng
 

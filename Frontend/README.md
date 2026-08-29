@@ -59,8 +59,9 @@ Artifact nằm trong `user/dist/` và `admin/dist/`.
 
 ## Phân chia trách nhiệm
 
-- `user`: đăng ký/đăng nhập, workspace, chat, AI consent, assistant, people, task, reminder,
-  calendar, memory và profile.
+- `user`: đăng ký/đăng nhập, workspace, chat (đính kèm file + emoji trong composer, layout
+  responsive cho điện thoại), AI consent, assistant, people, task, reminder, calendar, memory và
+  profile.
 - `admin`: đăng nhập riêng cho platform admin, dashboard, quản lý user và support access có thời
   hạn/owner approval.
 - `shared`: CSS nền dùng chung; không chứa business logic hoặc API client.
