@@ -1,0 +1,22 @@
+{
+  "steps": [
+    "Go to login page",
+    "Sign in (real tuan account)",
+    "Chat page loaded",
+    "Open the freshly-created demo conversation (first/most-recent item)",
+    "Type and send a commitment message",
+    "Show AI panel / permission card",
+    "Ask Orbit for a reminder",
+    "Confirm dialog appeared (human-in-the-loop)",
+    "Clicked Xac nhan",
+    "Go to Task Inbox",
+    "Accept the suggested task -> should auto-sync to real Google Calendar",
+    "Go to Calendar page - expect the real synced event to appear",
+    "Real Calendar event visible - click it",
+    "Delete the demo event (cleanup + shows 2-way sync)",
+    "Back to Task Inbox to confirm the task auto-dismissed",
+    "Done"
+  ],
+  "video": "Deliverables\\evidence\\orbit_real_demo_tuan_calendar.webm",
+  "event_deleted": true
+}
