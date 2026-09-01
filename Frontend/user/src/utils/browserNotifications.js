@@ -29,3 +29,22 @@ export function notifyTaskSuggested(task, { onClick } = {}) {
     return null
   }
 }
+
+export function notifyReminderFired(reminder, { onClick } = {}) {
+  if (!isNotificationSupported() || Notification.permission !== 'granted') return null
+  try {
+    const notification = new Notification(reminder.title || 'Orbit reminder', {
+      body: reminder.message || 'Đã đến giờ cho việc bạn cần theo dõi.',
+      tag: `reminder-fired-${reminder.id}`,
+      requireInteraction: true,
+    })
+    notification.onclick = () => {
+      window.focus()
+      onClick?.()
+      notification.close()
+    }
+    return notification
+  } catch {
+    return null
+  }
+}

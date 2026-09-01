@@ -81,6 +81,78 @@ async def test_ai_permission_grant_is_per_user_not_shared(client, auth_headers, 
 
 
 @pytest.mark.asyncio
+async def test_group_creator_can_enable_one_shared_ai_policy_at_creation(
+    client, auth_headers, other_auth_headers
+):
+    """A group opt-in is one manager decision, not N per-member permission toggles."""
+    other = (await client.get("/api/v1/auth/me", headers=other_auth_headers)).json()
+    workspace = (
+        await client.post(
+            "/api/v1/workspaces",
+            json={"name": "Group creation AI policy test"},
+            headers=auth_headers,
+        )
+    ).json()
+    added = await client.post(
+        f"/api/v1/workspaces/{workspace['id']}/members",
+        json={"email": other["email"], "role": "member"},
+        headers=auth_headers,
+    )
+    assert added.status_code == 201
+
+    created = await client.post(
+        "/api/v1/conversations",
+        json={
+            "type": "group",
+            "name": "AI shared from creation",
+            "participant_ids": [other["id"]],
+            "workspace_id": workspace["id"],
+            "ai_enabled": True,
+        },
+        headers=auth_headers,
+    )
+    assert created.status_code == 200, created.text
+    group = created.json()
+    assert group["ai_enabled"] is True
+    assert group["ai_permission_granted"] is True
+
+    manager_policy = await client.get(
+        f"/api/v1/conversations/{group['id']}/ai-permission", headers=auth_headers
+    )
+    member_policy = await client.get(
+        f"/api/v1/conversations/{group['id']}/ai-permission", headers=other_auth_headers
+    )
+    assert manager_policy.json() == {
+        "conversation_id": group["id"],
+        "granted": True,
+        "contribution_allowed": True,
+        "updated_at": manager_policy.json()["updated_at"],
+        "mode": "group_managed",
+        "can_manage": True,
+    }
+    assert member_policy.json()["granted"] is True
+    assert member_policy.json()["contribution_allowed"] is True
+    assert member_policy.json()["mode"] == "group_managed"
+    assert member_policy.json()["can_manage"] is False
+
+    member_list = await client.get(
+        f"/api/v1/conversations?workspace_id={workspace['id']}", headers=other_auth_headers
+    )
+    member_summary = next(
+        item for item in member_list.json()["conversations"] if item["id"] == group["id"]
+    )
+    assert member_summary["ai_permission_granted"] is True
+    assert member_summary["ai_enabled"] is True
+
+    denied = await client.put(
+        f"/api/v1/conversations/{group['id']}/ai-policy",
+        json={"enabled": False},
+        headers=other_auth_headers,
+    )
+    assert denied.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_assistant_access_and_contribution_consent_are_independent(
     client, auth_headers, other_auth_headers
 ):

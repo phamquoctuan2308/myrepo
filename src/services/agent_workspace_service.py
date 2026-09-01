@@ -134,13 +134,13 @@ async def create_agent_workspace(
         )
     if agent_profile not in WORKSPACE_AGENT_PROFILES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Workspace requires a supported agent profile",
         )
     normalized_key = key.strip().lower().replace(" ", "-")
     normalized_name = name.strip()
     if not normalized_key or not normalized_name:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Key and name are required")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Key and name are required")
 
     workspace = AgentWorkspace(
         organization_workspace_id=organization_workspace_id,
@@ -163,11 +163,15 @@ async def add_agent_workspace_member(
     business_role: str,
 ) -> AgentWorkspaceMembership:
     if business_role not in AGENT_WORKSPACE_ROLES:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Invalid business role")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid business role")
     agent_workspace = await db.get(AgentWorkspace, agent_workspace_id)
     if agent_workspace is None or agent_workspace.status != "active":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent workspace not found")
-    user = await db.get(User, user_id)
+    # Serialize assignments for one principal. This closes the race between two
+    # administrators assigning the same account to different Agent Workspaces.
+    user = (
+        await db.execute(select(User).where(User.id == user_id).with_for_update())
+    ).scalar_one_or_none()
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active user not found")
     organization_membership = (
@@ -184,6 +188,29 @@ async def add_agent_workspace_member(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="User must be an active organization workspace member",
+        )
+
+    active_elsewhere = (
+        await db.execute(
+            select(AgentWorkspaceMembership.id)
+            .join(
+                AgentWorkspace,
+                AgentWorkspace.id == AgentWorkspaceMembership.agent_workspace_id,
+            )
+            .where(
+                AgentWorkspaceMembership.user_id == user_id,
+                AgentWorkspaceMembership.status == "active",
+                AgentWorkspaceMembership.agent_workspace_id != agent_workspace_id,
+                AgentWorkspace.organization_workspace_id
+                == agent_workspace.organization_workspace_id,
+                AgentWorkspace.status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    if active_elsewhere is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User is already assigned to another active Agent Workspace",
         )
 
     if business_role == "lead":
@@ -334,17 +361,23 @@ async def link_agent_workspace_conversation(
     conversation_id: str,
     classification: str,
     linked_by_user_id: str,
+    channel_kind: str = "project",
 ) -> AgentWorkspaceConversation:
+    if channel_kind not in {"announcement", "team", "project", "release"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid workspace channel kind",
+        )
     agent_workspace = await require_agent_workspace(db, organization_workspace_id, agent_workspace_id)
     expected_classification = PROFILE_CLASSIFICATION.get(AgentProfile(agent_workspace.agent_profile))
     if expected_classification is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Executive workspaces consume validated briefs, not raw conversations",
         )
     if classification != expected_classification:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Conversation classification must match the agent workspace profile",
         )
     conversation = await db.get(Conversation, conversation_id)
@@ -352,7 +385,7 @@ async def link_agent_workspace_conversation(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
     if conversation.type != "group":
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Only group conversations can be linked to an agent workspace",
         )
 
@@ -375,6 +408,7 @@ async def link_agent_workspace_conversation(
         agent_workspace_id=agent_workspace_id,
         conversation_id=conversation_id,
         classification=classification,
+        channel_kind=channel_kind,
         linked_by_user_id=linked_by_user_id,
     )
     db.add(mapping)

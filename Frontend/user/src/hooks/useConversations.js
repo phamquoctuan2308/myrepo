@@ -1,17 +1,17 @@
-import { useEffect, useState } from 'react'
-import { listConversations } from '../api/chat'
+import { useCallback } from 'react'
+import { useConversationsQuery } from './useWorkspaceData'
+import { queryClient, queryKeys } from '../query/queryClient'
 
-export function useConversations(token) {
-  const [conversations, setConversations] = useState([])
-  const [loading, setLoading] = useState(true)
+export function useConversations(token, workspaceId) {
+  const query = useConversationsQuery(token, workspaceId)
+  const conversations = query.data?.conversations || []
+  const setConversations = useCallback(updater => {
+    queryClient.setQueryData(queryKeys.conversations(workspaceId), previous => {
+      const current = previous?.conversations || []
+      const next = typeof updater === 'function' ? updater(current) : updater
+      return { ...(previous || {}), conversations: next }
+    })
+  }, [workspaceId])
 
-  const refresh = () => {
-    if (!token) return
-    setLoading(true)
-    listConversations(token).then(data => setConversations(data.conversations)).finally(() => setLoading(false))
-  }
-
-  useEffect(() => { refresh() }, [token])
-
-  return { conversations, setConversations, loading, refresh }
+  return { conversations, setConversations, loading: query.isPending, refresh: query.refetch }
 }

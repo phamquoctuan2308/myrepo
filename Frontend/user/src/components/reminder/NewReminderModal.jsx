@@ -20,7 +20,7 @@ export default function NewReminderModal({ open, onClose, onCreated }) {
     try {
       const reminder = await createReminder(token, {
         title: title.trim(),
-        due_at_iso: `${dueAt}:00`,
+        due_at_iso: new Date(dueAt).toISOString(),
         lead_minutes: Number(leadMinutes) || 0,
         message: message.trim(),
       })

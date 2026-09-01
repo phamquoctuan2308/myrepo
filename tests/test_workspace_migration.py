@@ -183,6 +183,15 @@ def test_alembic_upgrade_builds_fresh_database(tmp_path):
         row[1]: row[2]
         for row in connection.execute("PRAGMA index_list('agent_workspace_memberships')")
     }
+    task_columns = {row[1] for row in connection.execute("PRAGMA table_info('tasks')")}
+    reminder_columns = {row[1] for row in connection.execute("PRAGMA table_info('reminders')")}
+    reminder_indexes = {row[1] for row in connection.execute("PRAGMA index_list('reminders')")}
+    workspace_agent_message_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info('workspace_agent_messages')")
+    }
+    workspace_agent_message_indexes = {
+        row[1] for row in connection.execute("PRAGMA index_list('workspace_agent_messages')")
+    }
     connection.close()
 
     assert {
@@ -204,7 +213,6 @@ def test_alembic_upgrade_builds_fresh_database(tmp_path):
         "event_candidates",
         "event_extraction_cursors",
         "assistant_threads",
-        "conversation_rolling_summaries",
     }.issubset(tables)
     assert "people_preferences" in tables
     assert {
@@ -212,10 +220,127 @@ def test_alembic_upgrade_builds_fresh_database(tmp_path):
         "agent_workspace_memberships",
         "agent_workspace_conversations",
     }.issubset(tables)
-    assert revision == "20260826_21"
+    assert {
+        "workspace_agent_threads",
+        "workspace_agent_messages",
+        "release_candidates",
+        "delivery_dependencies",
+        "delivery_decisions",
+        "quality_requirements",
+        "quality_test_cases",
+        "quality_test_runs",
+        "quality_defects",
+        "quality_evidence",
+        "quality_policies",
+        "quality_waivers",
+            "workspace_action_proposals",
+            "workspace_outbox_events",
+            "delivery_agent_workflows",
+            "delivery_agent_runs",
+            "delivery_specialist_results",
+            "delivery_workflow_events",
+            "delivery_event_inbox",
+            "delivery_checkpoint_tasks",
+            "delivery_group_schedules",
+        }.issubset(tables)
+    assert revision == "20260831_33"
+    assert {"calendar_event_id", "lead_minutes"}.issubset(reminder_columns)
+    assert "uq_reminders_owner_calendar_event" in reminder_indexes
+    assert "workflow_id" in workspace_agent_message_columns
+    assert "ix_workspace_agent_messages_workflow_id" in workspace_agent_message_indexes
+    assert "row_version" in task_columns
+    assert "completed_at" in task_columns
+    assert "started_at" in task_columns
+    assert "auto_reminder_enabled" in task_columns
+    assert {
+        "requires_review",
+        "submission_note",
+        "evidence_urls",
+        "submitted_by_user_id",
+        "submitted_at",
+        "reviewed_by_user_id",
+        "reviewed_at",
+        "review_note",
+    }.issubset(task_columns)
     assert membership_indexes["uq_agent_workspace_active_lead"] == 1
     assert "agent_threads" in tables
     assert {"google_identities", "ai_permissions"}.issubset(tables)
+
+
+def test_audit_log_repair_migration_handles_existing_legacy_table(tmp_path):
+    database_path = tmp_path / "legacy-audit-log.db"
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path.as_posix()}")
+
+    command.upgrade(config, "20260822_17")
+    connection = sqlite3.connect(database_path)
+    connection.execute("DROP TABLE audit_logs")
+    connection.executescript(
+        """
+        CREATE TABLE audit_logs (
+            id VARCHAR PRIMARY KEY,
+            actor_user_id VARCHAR,
+            actor_type VARCHAR NOT NULL,
+            action VARCHAR NOT NULL,
+            target_type VARCHAR NOT NULL,
+            target_id VARCHAR,
+            metadata_json JSON NOT NULL,
+            created_at DATETIME NOT NULL
+        );
+        """
+    )
+    connection.close()
+
+    command.upgrade(config, "head")
+    command.upgrade(config, "head")
+
+    connection = sqlite3.connect(database_path)
+    columns = {row[1] for row in connection.execute("PRAGMA table_info('audit_logs')")}
+    indexes = {row[1] for row in connection.execute("PRAGMA index_list('audit_logs')")}
+    revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+    connection.close()
+
+    assert {"workspace_id", "ip_address"}.issubset(columns)
+    assert {
+        "ix_audit_logs_workspace_id",
+        "ix_audit_logs_actor_user_id",
+        "ix_audit_logs_created_at",
+    }.issubset(indexes)
+    assert revision == "20260831_33"
+
+
+def test_personal_space_repair_migration_backfills_post_foundation_users_idempotently(tmp_path):
+    database_path = tmp_path / "missing-personal-space.db"
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path.as_posix()}")
+
+    command.upgrade(config, "20260824_18")
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        INSERT INTO users
+            (id, email, password_hash, display_name, role, platform_role, is_active,
+             job_title, timezone, preferences, created_at)
+        VALUES
+            ('direct-user', 'direct@example.com', 'hash', 'Direct User', 'user', 'user', 1,
+             '', 'Asia/Ho_Chi_Minh', '{}', '2026-08-24 00:00:00')
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    command.upgrade(config, "head")
+    command.upgrade(config, "head")
+
+    connection = sqlite3.connect(database_path)
+    rows = connection.execute(
+        "SELECT type, status, personal_owner_user_id FROM workspaces WHERE personal_owner_user_id = 'direct-user'"
+    ).fetchall()
+    revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+    connection.close()
+
+    assert rows == [("personal", "active", "direct-user")]
+    assert revision == "20260831_33"
 
 
 def test_agent_workspace_migration_downgrades_cleanly(tmp_path):

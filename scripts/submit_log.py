@@ -19,18 +19,11 @@ import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
-# Only loaded when run as a script (git hook or manual invocation), never on import - unlike
-# pydantic-settings' own dotenv reads elsewhere in this repo, python-dotenv's load_dotenv()
-# mutates the real process environment, which previously leaked every real secret in the repo
-# root .env (Google API keys, Calendar OAuth client, etc.) into any test that merely imported this
-# module for its helper functions (tests/test_submit_log.py), regardless of that test's own env
-# isolation in conftest.py.
-if __name__ == "__main__":
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ImportError:
-        pass
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 SERVER_URL = os.environ.get("AI_LOG_SERVER", "")
 API_KEY = os.environ.get("AI_LOG_API_KEY", "")

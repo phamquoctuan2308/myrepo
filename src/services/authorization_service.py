@@ -108,22 +108,17 @@ async def require_conversation_access(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
     if participant.principal_kind == "workspace_user":
-        workspace = await db.get(Workspace, conversation.workspace_id)
-        # Personal workspaces have no membership roster (see workspace_service.create_personal_workspace) -
-        # ConversationParticipant membership above is already the full authorization for that case.
-        # Only organization-anchored conversations additionally require active workspace membership.
-        if workspace is not None and workspace.type == "organization":
-            membership = (
-                await db.execute(
-                    select(WorkspaceMembership).where(
-                        WorkspaceMembership.workspace_id == conversation.workspace_id,
-                        WorkspaceMembership.user_id == user.id,
-                        WorkspaceMembership.status == "active",
-                    )
+        membership = (
+            await db.execute(
+                select(WorkspaceMembership).where(
+                    WorkspaceMembership.workspace_id == conversation.workspace_id,
+                    WorkspaceMembership.user_id == user.id,
+                    WorkspaceMembership.status == "active",
                 )
-            ).scalar_one_or_none()
-            if membership is None:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace access denied")
+            )
+        ).scalar_one_or_none()
+        if membership is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace access denied")
     elif participant.principal_kind != "external_contact":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Conversation access denied")
 
@@ -137,14 +132,6 @@ async def get_authorized_participant_ids(db: AsyncSession, conversation_id: str)
     conversation = await db.get(Conversation, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
-    # Same personal-vs-organization distinction as require_conversation_access above: personal
-    # workspaces have no WorkspaceMembership roster at all, so requiring one here silently
-    # excluded every participant of a personal-workspace conversation from this list - the
-    # caller (chat_routes.send_message) uses it to pick who gets the "new_message" WebSocket
-    # broadcast, so this was why messages only ever showed up after a manual refresh (the REST
-    # fetch doesn't go through this filter, only the realtime push did).
-    workspace = await db.get(Workspace, conversation.workspace_id)
-    is_organization = workspace is not None and workspace.type == "organization"
     participants = (
         (
             await db.execute(
@@ -168,7 +155,7 @@ async def get_authorized_participant_ids(db: AsyncSession, conversation_id: str)
         user = await db.get(User, user_id)
         if user is None or not user.is_active:
             continue
-        if participant.principal_kind == "workspace_user" and is_organization:
+        if participant.principal_kind == "workspace_user":
             membership = (
                 await db.execute(
                     select(WorkspaceMembership.id).where(

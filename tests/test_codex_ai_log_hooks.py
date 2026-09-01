@@ -261,10 +261,8 @@ def test_codex_notify_installer_preserves_config_and_adds_top_level_command(tmp_
 
     assert result.returncode == 0, result.stderr
     updated = config_path.read_text(encoding="utf-8")
-    assert updated.startswith('notify = ["powershell.exe"')
-    # install_codex_notify.ps1 TOML-escapes the absolute path (each "\" doubled) - match that
-    # against the actual checkout location instead of a hardcoded path from a different machine.
     escaped_notify_script = str(notify_script).replace("\\", "\\\\")
+    assert updated.startswith('notify = ["powershell.exe"')
     assert f'"-File", "{escaped_notify_script}"]' in updated
     assert 'model = "gpt-test"' in updated
     assert '[projects."f:\\\\p-132"]' in updated

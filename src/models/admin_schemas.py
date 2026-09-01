@@ -16,7 +16,6 @@ class AdminUserOut(BaseModel):
     platform_role: Literal["user", "platform_admin"]
     is_active: bool
     created_at: datetime
-    daily_token_budget: int | None = None
 
 
 class AdminStats(BaseModel):
@@ -39,6 +38,7 @@ class AdminHealthComponent(BaseModel):
     label: str
     status: Literal["operational", "degraded", "down"]
     detail: str
+
 
 class AdminSystemHealth(BaseModel):
     overall_status: Literal["operational", "degraded", "down"]
@@ -120,10 +120,6 @@ class UpdateRoleRequest(BaseModel):
 
 
 class UpdateBudgetRequest(BaseModel):
-    daily_token_budget: int = Field(..., ge=0)
-
-
-class UpdateUserBudgetRequest(BaseModel):
     daily_token_budget: int = Field(..., ge=0)
 
 

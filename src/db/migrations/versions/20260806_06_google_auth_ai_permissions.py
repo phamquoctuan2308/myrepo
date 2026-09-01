@@ -45,7 +45,9 @@ def upgrade() -> None:
             item["name"] for item in sa.inspect(connection).get_check_constraints("reminders")
         }
         if "ck_reminder_source" in constraints:
-            with op.batch_alter_table("reminders") as batch_op:
+            with op.batch_alter_table(
+                "reminders", reflect_kwargs={"resolve_fks": False}
+            ) as batch_op:
                 batch_op.drop_constraint("ck_reminder_source", type_="check")
                 batch_op.create_check_constraint(
                     "ck_reminder_source",
@@ -54,7 +56,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("reminders") as batch_op:
+    with op.batch_alter_table(
+        "reminders", reflect_kwargs={"resolve_fks": False}
+    ) as batch_op:
         batch_op.drop_constraint("ck_reminder_source", type_="check")
         batch_op.create_check_constraint(
             "ck_reminder_source",

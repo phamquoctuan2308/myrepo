@@ -49,7 +49,6 @@ dev = [
     "ruff>=0.8.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
-    "pytest-cov>=6.0.0",
 ]
 
 [project.urls]
@@ -60,7 +59,3 @@ repository = "https://github.com/AI20K-Build-Phase-Cohort-3/P-132"
 # connection pool (opened once, session-scoped) stays valid across every test function.
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-markers = [
-    "memory_harness: deterministic evaluation of memory retrieval, lifecycle, compaction and context contracts",
-    "agent_quality_harness: deterministic evaluation of short/long memory, guardrails, ambiguity and task scoring",
-]

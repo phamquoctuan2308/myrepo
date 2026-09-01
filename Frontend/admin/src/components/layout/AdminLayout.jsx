@@ -6,7 +6,7 @@ export default function AdminLayout() {
   const [open, setOpen] = useState(false)
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  const userAppUrl = import.meta.env.VITE_USER_APP_URL || 'https://c3-app-132-auo2.vercel.app'
+  const userAppUrl = import.meta.env.VITE_USER_APP_URL || 'http://localhost:5173'
   const initials = user?.display_name?.split(/\s+/).filter(Boolean).map(part => part[0]).slice(0, 2).join('').toUpperCase() || 'PA'
   const navigation = [
     ['/admin', 'bi-grid-1x2', 'Dashboard'],

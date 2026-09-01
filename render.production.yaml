@@ -1,0 +1,250 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+
+databases:
+  - name: orbit-postgres
+    databaseName: orbit
+    user: orbit
+    plan: 0.5c-1g
+    region: singapore
+    postgresMajorVersion: "16"
+    ipAllowList: []
+
+envVarGroups:
+  - name: orbit-production-shared
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_HOST
+        value: 0.0.0.0
+      - key: LOG_LEVEL
+        value: INFO
+      - key: CORS_ORIGINS
+        value: https://orbit.invalid
+      - key: CORS_ORIGIN_REGEX
+        value: ""
+      - key: LLM_PROVIDER
+        value: openrouter
+      - key: MODEL_NAME
+        value: openai/gpt-5.6-luna
+      - key: PRODUCT_DELIVERY_LLM_PROVIDER
+        value: openrouter
+      - key: PRODUCT_DELIVERY_MODEL_NAME
+        value: openai/gpt-5.6-luna
+      - key: PRODUCT_DELIVERY_ROUTING_LLM_PROVIDER
+        value: openrouter
+      - key: PRODUCT_DELIVERY_ROUTING_MODEL_NAME
+        value: openai/gpt-5.6-luna
+      - key: PRODUCT_DELIVERY_SPECIALIST_LLM_PROVIDER
+        value: openrouter
+      - key: PRODUCT_DELIVERY_SPECIALIST_MODEL_NAME
+        value: openai/gpt-5.6-luna
+      - key: QUALITY_ASSURANCE_LLM_PROVIDER
+        value: openrouter
+      - key: QUALITY_ASSURANCE_MODEL_NAME
+        value: openai/gpt-5.6-luna
+      - key: OPENROUTER_APP_NAME
+        value: Orbit
+      - key: DAILY_TOKEN_BUDGET
+        value: "150000"
+      - key: CALENDAR_TIMEZONE
+        value: Asia/Ho_Chi_Minh
+      - key: SCHEDULER_TIMEZONE
+        value: Asia/Ho_Chi_Minh
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: RATE_LIMIT_AUTH
+        value: 10/minute
+      - key: RATE_LIMIT_REGISTER
+        value: 5/minute
+      - key: RATE_LIMIT_CHAT
+        value: 15/minute
+      - key: RATE_LIMIT_READ
+        value: 300/minute
+      - key: RATE_LIMIT_CRUD
+        value: 60/minute
+      - key: MULTI_AGENT_ENABLED
+        value: "true"
+      - key: PRODUCT_DELIVERY_AGENT_ENABLED
+        value: "true"
+      - key: QUALITY_ASSURANCE_AGENT_ENABLED
+        value: "true"
+      - key: EXECUTIVE_AGENT_ENABLED
+        value: "false"
+      - key: WORKSPACE_AGENT_RUNTIME_MODE
+        value: remote
+      - key: WORKSPACE_AGENT_RUNTIME_VERSION
+        value: product-delivery-v2
+      - key: QUALITY_ASSURANCE_RUNTIME_VERSION
+        value: quality-assurance-v2
+      - key: WORKSPACE_AGENT_VERIFIER_ENABLED
+        value: "true"
+      - key: PRODUCT_DELIVERY_HYBRID_ROUTER_ENABLED
+        value: "true"
+      - key: PRODUCT_DELIVERY_SUPERVISOR_ENABLED
+        value: "true"
+      - key: PRODUCT_DELIVERY_MULTI_SPECIALIST_WORKFLOWS_ENABLED
+        value: "true"
+      - key: PRODUCT_DELIVERY_TASK_SPECIALIST_ENABLED
+        value: "true"
+      - key: DEMO_LOGIN_ENABLED
+        value: "false"
+      - key: ALLOW_DEMO_LOGIN_IN_PRODUCTION
+        value: "false"
+
+services:
+  - type: web
+    name: orbit-backend
+    runtime: docker
+    branch: deploy
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    preDeployCommand: alembic upgrade head
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - fromGroup: orbit-production-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: orbit-postgres
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: WORKSPACE_AGENT_RUNTIME_SECRET
+        generateValue: true
+      - key: QUALITY_ASSURANCE_RUNTIME_SECRET
+        generateValue: true
+      - key: WORKSPACE_AGENT_RUNTIME_HOSTPORT
+        fromService:
+          type: pserv
+          name: orbit-agent-product-delivery
+          property: hostport
+      - key: QUALITY_ASSURANCE_RUNTIME_HOSTPORT
+        fromService:
+          type: pserv
+          name: orbit-agent-quality-assurance
+          property: hostport
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: OPENROUTER_SITE_URL
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CALENDAR_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CALENDAR_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CALENDAR_REDIRECT_URI
+        sync: false
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: INITIAL_ADMIN_EMAIL
+        sync: false
+
+  - type: pserv
+    name: orbit-agent-product-delivery
+    runtime: docker
+    branch: deploy
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: uvicorn src.workspace_agent_runtime.main:app --host 0.0.0.0 --port 8010
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - fromGroup: orbit-production-shared
+      - key: PORT
+        value: "8010"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: orbit-postgres
+          property: connectionString
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: orbit-backend
+          envVarKey: SECRET_KEY
+      - key: OPENROUTER_API_KEY
+        fromService:
+          type: web
+          name: orbit-backend
+          envVarKey: OPENROUTER_API_KEY
+      - key: WORKSPACE_AGENT_RUNTIME_SECRET
+        fromService:
+          type: web
+          name: orbit-backend
+          envVarKey: WORKSPACE_AGENT_RUNTIME_SECRET
+      - key: QUALITY_ASSURANCE_RUNTIME_SECRET
+        fromService:
+          type: web
+          name: orbit-backend
+          envVarKey: QUALITY_ASSURANCE_RUNTIME_SECRET
+      - key: WORKSPACE_AGENT_RUNTIME_WORKSPACE_ID
+        value: 9ff3ceb2b31f57238014e93e2402c0c8
+      - key: WORKSPACE_AGENT_RUNTIME_PROFILE
+        value: product_delivery
+      - key: WORKSPACE_AGENT_RUNTIME_VERSION
+        value: product-delivery-v2
+      - key: WORKSPACE_AGENT_PROGRESS_CALLBACK_HOSTPORT
+        fromService:
+          type: web
+          name: orbit-backend
+          property: hostport
+
+  - type: pserv
+    name: orbit-agent-quality-assurance
+    runtime: docker
+    branch: deploy
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: uvicorn src.workspace_agent_runtime.main:app --host 0.0.0.0 --port 8011
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - fromGroup: orbit-production-shared
+      - key: PORT
+        value: "8011"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: orbit-postgres
+          property: connectionString
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: orbit-backend
+          envVarKey: SECRET_KEY
+      - key: OPENROUTER_API_KEY
+        fromService:
+          type: web
+          name: orbit-backend
+          envVarKey: OPENROUTER_API_KEY
+      - key: WORKSPACE_AGENT_RUNTIME_SECRET
+        fromService:
+          type: web
+          name: orbit-backend
+          envVarKey: QUALITY_ASSURANCE_RUNTIME_SECRET
+      - key: QUALITY_ASSURANCE_RUNTIME_SECRET
+        fromService:
+          type: web
+          name: orbit-backend
+          envVarKey: QUALITY_ASSURANCE_RUNTIME_SECRET
+      - key: WORKSPACE_AGENT_RUNTIME_WORKSPACE_ID
+        value: 311fe424edfa41989a495316b6925c84
+      - key: WORKSPACE_AGENT_RUNTIME_PROFILE
+        value: quality_assurance
+      - key: WORKSPACE_AGENT_RUNTIME_VERSION
+        value: quality-assurance-v2
+      - key: WORKSPACE_AGENT_PROGRESS_CALLBACK_HOSTPORT
+        fromService:
+          type: web
+          name: orbit-backend
+          property: hostport

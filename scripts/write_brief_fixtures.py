@@ -10,6 +10,7 @@ from src.agents.contracts import (  # noqa: E402, I001
     AgentProfile,
     BriefType,
     ReleaseReadiness,
+    SourceReference,
     WorkspaceBrief,
 )
 
@@ -44,7 +45,15 @@ def build_briefs() -> dict[str, WorkspaceBrief]:
             dependencies=({"name": "API contract", "owner": "platform"},),
             decisions_needed=({"decision": "Confirm API contract deadline"},),
             data_gaps=(),
-            sources=(),
+            sources=(
+                SourceReference(
+                    resource_id="group-delivery-apollo",
+                    resource_type="conversation",
+                    agent_workspace_id="agent-workspace-delivery",
+                    classification="delivery",
+                    captured_at=generated_at,
+                ),
+            ),
         ),
         "quality_brief_v1.json": WorkspaceBrief(
             brief_id="brief-quality-v1",
@@ -66,7 +75,15 @@ def build_briefs() -> dict[str, WorkspaceBrief]:
             dependencies=({"name": "Staging data refresh", "owner": "platform"},),
             decisions_needed=({"decision": "Approve regression test window"},),
             data_gaps=(),
-            sources=(),
+            sources=(
+                SourceReference(
+                    resource_id="group-quality-release",
+                    resource_type="conversation",
+                    agent_workspace_id="agent-workspace-quality",
+                    classification="quality",
+                    captured_at=generated_at,
+                ),
+            ),
             release_readiness=ReleaseReadiness.AT_RISK,
         ),
     }

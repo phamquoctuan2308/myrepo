@@ -1,12 +1,19 @@
-services:
-  - type: web
-    name: orbit-backend
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+
+# Free demo topology: one public Core service embeds both workspace-agent
+# runtimes. For isolated private runtimes and persistent managed Postgres, use
+# render.production.yaml instead.
+databases:
+  - name: orbit-postgres
+    databaseName: orbit
+    user: orbit
     plan: free
-    healthCheckPath: /health
-    autoDeployTrigger: off
+    region: singapore
+    postgresMajorVersion: "16"
+    ipAllowList: []
+
+envVarGroups:
+  - name: orbit-demo-shared
     envVars:
       - key: APP_ENV
         value: production
@@ -14,36 +21,34 @@ services:
         value: 0.0.0.0
       - key: LOG_LEVEL
         value: INFO
+      - key: CORS_ORIGINS
+        value: https://orbit.invalid
+      - key: CORS_ORIGIN_REGEX
+        value: ""
       - key: LLM_PROVIDER
-        value: openai
+        value: openrouter
       - key: MODEL_NAME
-        value: gpt-4o-mini
+        value: openai/gpt-5.6-luna
+      - key: PRODUCT_DELIVERY_LLM_PROVIDER
+        value: openrouter
+      - key: PRODUCT_DELIVERY_MODEL_NAME
+        value: openai/gpt-5.6-luna
+      - key: PRODUCT_DELIVERY_ROUTING_LLM_PROVIDER
+        value: openrouter
+      - key: PRODUCT_DELIVERY_ROUTING_MODEL_NAME
+        value: openai/gpt-5.6-luna
+      - key: PRODUCT_DELIVERY_SPECIALIST_LLM_PROVIDER
+        value: openrouter
+      - key: PRODUCT_DELIVERY_SPECIALIST_MODEL_NAME
+        value: openai/gpt-5.6-luna
+      - key: QUALITY_ASSURANCE_LLM_PROVIDER
+        value: openrouter
+      - key: QUALITY_ASSURANCE_MODEL_NAME
+        value: openai/gpt-5.6-luna
+      - key: OPENROUTER_APP_NAME
+        value: Orbit
       - key: DAILY_TOKEN_BUDGET
-        value: "150000"
-      - key: AGENT_CONTEXT_WINDOW_TOKENS
-        value: "32768"
-      - key: AGENT_OUTPUT_RESERVE_TOKENS
-        value: "4096"
-      - key: MEMORY_SHORT_TERM_FRACTION
-        value: "0.10"
-      - key: MEMORY_LONG_TERM_FRACTION
-        value: "0.04"
-      - key: MEMORY_EPISODIC_FRACTION
-        value: "0.03"
-      - key: MEMORY_RETRIEVAL_FRACTION
-        value: "0.03"
-      - key: MEMORY_HEARTBEAT_INTERVAL_SECONDS
-        value: "900"
-      - key: MEMORY_COMPACTION_MESSAGE_THRESHOLD
-        value: "24"
-      - key: MEMORY_RECENT_MESSAGES_TO_KEEP
-        value: "12"
-      - key: JWT_ALGORITHM
-        value: HS256
-      - key: ACCESS_TOKEN_EXPIRE_MINUTES
-        value: "1440"
-      - key: CHROMA_PERSIST_DIR
-        value: ./data/chroma
+        value: "50000"
       - key: CALENDAR_TIMEZONE
         value: Asia/Ho_Chi_Minh
       - key: SCHEDULER_TIMEZONE
@@ -55,16 +60,80 @@ services:
       - key: RATE_LIMIT_REGISTER
         value: 5/minute
       - key: RATE_LIMIT_CHAT
-        value: 15/minute
+        value: 10/minute
+      - key: RATE_LIMIT_READ
+        value: 180/minute
       - key: RATE_LIMIT_CRUD
-        value: 60/minute
+        value: 40/minute
+      - key: MULTI_AGENT_ENABLED
+        value: "true"
+      - key: PRODUCT_DELIVERY_AGENT_ENABLED
+        value: "true"
+      - key: QUALITY_ASSURANCE_AGENT_ENABLED
+        value: "true"
+      - key: EXECUTIVE_AGENT_ENABLED
+        value: "false"
+      - key: WORKSPACE_AGENT_RUNTIME_MODE
+        value: embedded
+      - key: ALLOW_EMBEDDED_WORKSPACE_AGENTS_IN_PRODUCTION
+        value: "true"
+      - key: OPEN_TEST_CHAT_ENABLED
+        value: "true"
+      - key: WORKSPACE_AGENT_RUNTIME_VERSION
+        value: product-delivery-v2
+      - key: QUALITY_ASSURANCE_RUNTIME_VERSION
+        value: quality-assurance-v2
+      - key: WORKSPACE_AGENT_MAX_CONCURRENCY
+        value: "1"
+      - key: WORKSPACE_AGENT_RUNTIME_QUEUE_TIMEOUT_SECONDS
+        value: "5"
+      - key: WORKSPACE_AGENT_RUNTIME_TIMEOUT_SECONDS
+        value: "90"
+      - key: WORKSPACE_AGENT_VERIFIER_ENABLED
+        value: "true"
+      - key: PRODUCT_DELIVERY_HYBRID_ROUTER_ENABLED
+        value: "true"
+      - key: PRODUCT_DELIVERY_SUPERVISOR_ENABLED
+        value: "true"
+      - key: PRODUCT_DELIVERY_MULTI_SPECIALIST_WORKFLOWS_ENABLED
+        value: "true"
+      - key: PRODUCT_DELIVERY_TASK_SPECIALIST_ENABLED
+        value: "true"
+      - key: DB_POOL_SIZE
+        value: "2"
+      - key: DB_MAX_OVERFLOW
+        value: "1"
+      - key: DEMO_LOGIN_ENABLED
+        value: "true"
+      - key: ALLOW_DEMO_LOGIN_IN_PRODUCTION
+        value: "true"
+
+services:
+  - type: web
+    name: orbit-backend
+    runtime: docker
+    branch: deploy
+    region: singapore
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Free services do not support a pre-deploy command. The Dockerfile's
+    # scripts/start_web.sh runs migrations and then starts Uvicorn on $PORT.
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - fromGroup: orbit-demo-shared
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: orbit-postgres
+          property: connectionString
       - key: SECRET_KEY
-        sync: false
-      - key: OPENAI_API_KEY
+        generateValue: true
+      - key: OPENROUTER_API_KEY
         sync: false
       - key: CORS_ORIGINS
+        sync: false
+      - key: OPENROUTER_SITE_URL
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
@@ -79,6 +148,4 @@ services:
       - key: FRONTEND_ORIGIN
         sync: false
       - key: INITIAL_ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_BOOTSTRAP_KEY
         sync: false

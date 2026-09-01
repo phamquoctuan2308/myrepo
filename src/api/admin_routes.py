@@ -34,7 +34,6 @@ from src.models.admin_schemas import (
     AdminUserOut,
     UpdateAIConfigurationRequest,
     UpdateBudgetRequest,
-    UpdateUserBudgetRequest,
     UpdateRoleRequest,
     UpdateStatusRequest,
 )
@@ -73,7 +72,8 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> AdminStats:
 
     budget = await usage_service.get_daily_token_budget()
     usage = await usage_service.get_usage_today()
-    budget_used_pct = round(usage["total_tokens"] / budget * 100, 1) if budget else 0.0
+    peak_account_usage = await usage_service.get_peak_account_usage_today()
+    budget_used_pct = round(peak_account_usage / budget * 100, 1) if budget else 0.0
     return AdminStats(
         total_users=total_users,
         total_conversations=total_conversations,
@@ -126,6 +126,7 @@ async def get_system_health(db: AsyncSession = Depends(get_db)) -> AdminSystemHe
         "google": settings.google_api_key,
         "groq": settings.groq_api_key,
         "openai": settings.openai_api_key,
+        "openrouter": settings.openrouter_api_key,
     }
     llm_configured = bool(provider_keys[settings.llm_provider])
     components.append(
@@ -174,6 +175,7 @@ async def get_ai_management(db: AsyncSession = Depends(get_db)) -> AdminAIManage
         "google": settings.google_api_key,
         "groq": settings.groq_api_key,
         "openai": settings.openai_api_key,
+        "openrouter": settings.openrouter_api_key,
     }
     granted_permissions = (
         await db.execute(select(func.count()).select_from(AIPermission).where(AIPermission.granted.is_(True)))
@@ -428,20 +430,6 @@ async def update_user_role(
     return AdminUserOut.model_validate(user, from_attributes=True)
 
 
-@router.patch("/users/{user_id}/budget", response_model=AdminUserOut)
-async def update_user_budget(
-    user_id: str,
-    request: UpdateUserBudgetRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_admin),
-) -> AdminUserOut:
-    user = await _get_user_or_404(user_id, db)
-    user.daily_token_budget = request.daily_token_budget
-    await record_audit_event(db, actor=current_user, action="platform.user_budget_changed", target_type="user", target_id=user_id, workspace_id=None, metadata={"daily_token_budget": request.daily_token_budget})
-    await db.commit()
-    await db.refresh(user)
-    return AdminUserOut.model_validate(user, from_attributes=True)
-
 @router.patch("/users/{user_id}/status", response_model=AdminUserOut)
 async def update_user_status(
     user_id: str,
@@ -493,9 +481,11 @@ async def list_all_tasks(
             conversation_id=t.conversation_id,
             title=t.title,
             due_at=t.due_at,
+            auto_reminder_enabled=t.auto_reminder_enabled,
             priority=t.priority,
             status=t.status,
             source=t.source,
+            row_version=t.row_version,
             created_at=t.created_at,
             updated_at=t.updated_at,
             owner_id=t.owner_id,
@@ -529,6 +519,7 @@ async def delete_task_admin(
         workspace_id=workspace_id,
         metadata={},
     )
+    await reminder_service.remove_task_reminder(task.id)
     await db.delete(task)
     await db.commit()
 
@@ -556,6 +547,9 @@ async def list_all_reminders(
         AdminReminderOut(
             id=r.id,
             workspace_id=r.workspace_id,
+            task_id=r.task_id,
+            calendar_event_id=r.calendar_event_id,
+            lead_minutes=r.lead_minutes,
             title=r.title,
             message=r.message,
             due_at=r.due_at,
@@ -627,15 +621,11 @@ async def list_all_memories(
             title=m.title,
             detail=m.detail,
             memory_type=m.memory_type,
-            status=m.status,
-            source_type=m.source_type,
             source_conversation_id=m.source_conversation_id,
             source_message_ids=m.source_message_ids or [],
             consent_scope_hash=m.consent_scope_hash,
             sensitivity=m.sensitivity,
             confidence=m.confidence,
-            importance=m.importance,
-            user_confirmed=m.user_confirmed,
             expires_at=m.expires_at,
             last_accessed_at=m.last_accessed_at,
             created_at=m.created_at,

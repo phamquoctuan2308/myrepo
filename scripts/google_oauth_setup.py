@@ -19,7 +19,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow  # noqa: E402
 
 from src.config import get_settings  # noqa: E402
 
-_SCOPES = ["https://www.googleapis.com/auth/calendar"]
+_SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 
 
 def main() -> None:

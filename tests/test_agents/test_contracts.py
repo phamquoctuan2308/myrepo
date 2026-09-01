@@ -201,6 +201,18 @@ def test_workspace_brief_enforces_profile_sources_and_freshness():
                 "sources": [_source(workspace_id="delivery-1").model_dump()],
             }
         )
+    with pytest.raises(ValidationError, match="requires release_readiness"):
+        WorkspaceBrief.model_validate({**brief.model_dump(), "release_readiness": None})
+    with pytest.raises(ValidationError, match="cannot contain data gaps"):
+        WorkspaceBrief.model_validate(
+            {
+                **brief.model_dump(),
+                "release_readiness": ReleaseReadiness.READY,
+                "data_gaps": ["Release evidence is incomplete"],
+            }
+        )
+    with pytest.raises(ValidationError, match="requires at least one source"):
+        WorkspaceBrief.model_validate({**brief.model_dump(), "sources": []})
 
 
 def test_executive_brief_requires_briefs_or_an_explicit_data_gap():

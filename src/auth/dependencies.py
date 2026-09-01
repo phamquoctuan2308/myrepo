@@ -9,11 +9,11 @@ from src.db.models import User
 from src.db.session import get_db
 from src.services.authorization_service import require_platform_admin as authorize_platform_admin
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    creds: HTTPAuthorizationCredentials = Depends(security),
+    creds: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     credentials_error = HTTPException(
@@ -21,6 +21,8 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if creds is None:
+        raise credentials_error
     try:
         user_id = decode_access_token(creds.credentials)
     except jwt.PyJWTError:

@@ -3,8 +3,8 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+COPY requirements.lock .
+RUN pip install --no-cache-dir --user -r requirements.lock
 
 # ---- Stage 2: Production ----
 FROM python:3.11-slim
@@ -32,6 +32,6 @@ USER appuser
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT:-8000}/health')" || exit 1
+    CMD python -c "import os, urllib.request; port = os.getenv('PORT', '8000'); path = '/internal/v1/health/ready' if os.getenv('WORKSPACE_AGENT_RUNTIME_WORKSPACE_ID') else '/health'; urllib.request.urlopen(f'http://localhost:{port}{path}')" || exit 1
 
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn src.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["/bin/sh", "scripts/start_web.sh"]

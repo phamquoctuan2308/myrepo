@@ -15,7 +15,7 @@ Scores two separate things, because they fail independently:
 Usage:
     python scripts/eval_extract_tasks.py
 """
-import argparse
+
 import asyncio
 import json
 import sys
@@ -31,7 +31,6 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.task_eval_metrics import parse_predicted, score_case  # noqa: E402
 from src.agents.tools.task_tool import extract_tasks  # noqa: E402
 from src.config import get_settings  # noqa: E402
 
@@ -168,64 +167,74 @@ DATASET: list[EvalCase] = [
 
 
 def _parse_predicted(raw: str) -> list[dict]:
-    return parse_predicted(raw)
+    cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _check_date(predicted: dict, expected: ExpectedTask, today: date, tz: ZoneInfo) -> bool | None:
+    """Returns True/False if a date was expected and could be checked, None if not applicable
+    (this expected item carries no date to check against)."""
+    if expected.expected_date is None:
+        return None
+    raw_due = predicted.get("due_at")
+    if not raw_due:
+        return False  # a date was expected in the conversation but nothing was extracted
+    try:
+        parsed = datetime.fromisoformat(raw_due)
+    except ValueError:
+        return False
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(tz)
+    if parsed.date() != expected.expected_date(today):
+        return False
+    if expected.expected_hour_range is not None:
+        lo, hi = expected.expected_hour_range
+        if not (lo <= parsed.hour <= hi):
+            return False
+    return True
 
 
 def _score_case(
     expected: list[ExpectedTask], predicted: list[dict], today: date, tz: ZoneInfo
 ) -> tuple[int, int, int, list[bool]]:
-    return score_case(expected, predicted, today, tz)
-
-
-def _arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate real-LLM task extraction against the versioned dataset.")
-    parser.add_argument("--as-of", help="Reference date in YYYY-MM-DD, for reproducible relative-date scoring.")
-    parser.add_argument("--output", help="Optional UTF-8 JSON report path.")
-    parser.add_argument(
-        "--retries",
-        type=int,
-        default=2,
-        help="Retries per transient model-provider error before recording the case as failed (default: 2).",
-    )
-    parser.add_argument(
-        "--timeout-seconds",
-        type=float,
-        default=45.0,
-        help="Maximum seconds for one model call before retrying it (default: 45).",
-    )
-    return parser.parse_args()
+    """Greedy keyword matching. Returns (true_positives, false_positives, false_negatives,
+    date_check_results) - date_check_results has one True/False entry per expected item whose
+    title matched AND that carries an expected date (skips items with expected_date=None)."""
+    remaining = list(predicted)
+    true_positives = 0
+    date_results: list[bool] = []
+    for exp in expected:
+        match = next(
+            (p for p in remaining if any(kw.lower() in p.get("title", "").lower() for kw in exp.keywords)), None
+        )
+        if match is not None:
+            remaining.remove(match)
+            true_positives += 1
+            date_ok = _check_date(match, exp, today, tz)
+            if date_ok is not None:
+                date_results.append(date_ok)
+    false_negatives = len(expected) - true_positives
+    false_positives = len(remaining)
+    return true_positives, false_positives, false_negatives, date_results
 
 
 async def main() -> None:
-    args = _arguments()
-    if args.retries < 0 or args.timeout_seconds <= 0:
-        raise SystemExit("--retries must be non-negative and --timeout-seconds must be positive.")
     settings = get_settings()
     tz = ZoneInfo(settings.calendar_timezone)
-    today = date.fromisoformat(args.as_of) if args.as_of else datetime.now(tz).date()
+    today = datetime.now(tz).date()
 
     total_tp = total_fp = total_fn = 0
     total_date_correct = total_date_checked = 0
-    llm_errors: list[dict[str, str]] = []
     print(
         f"Running task-extraction accuracy eval on {len(DATASET)} cases (today = {today}, {settings.calendar_timezone})...\n"
     )
 
     for case in DATASET:
-        raw = "[]"
-        for attempt in range(args.retries + 1):
-            try:
-                raw = await asyncio.wait_for(
-                    extract_tasks.coroutine(state={"context": case.conversation}),
-                    timeout=args.timeout_seconds,
-                )
-                break
-            except Exception as exc:  # noqa: BLE001 - report provider failure as evaluation evidence
-                if attempt == args.retries:
-                    llm_errors.append({"case": case.name, "error": f"{type(exc).__name__}: {exc}"})
-                    print(f"[ERROR] {case.name}: model call failed after {attempt + 1} attempts")
-                else:
-                    await asyncio.sleep(attempt + 1)
+        raw = await extract_tasks.coroutine(state={"context": case.conversation})
         predicted = _parse_predicted(raw)
         tp, fp, fn, date_results = _score_case(case.expected, predicted, today, tz)
         total_tp += tp
@@ -253,33 +262,6 @@ async def main() -> None:
     print(f"\nTitle extraction — Precision: {precision:.1%}  Recall: {recall:.1%}  F1: {f1:.1%}")
     print(f"Date accuracy — {total_date_correct}/{total_date_checked} correct ({date_accuracy:.1%})")
 
-    if args.output:
-        report_path = Path(args.output)
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(
-            json.dumps(
-                {
-                    "as_of": today.isoformat(),
-                    "timezone": settings.calendar_timezone,
-                    "case_count": len(DATASET),
-                    "title_precision": precision,
-                    "title_recall": recall,
-                    "title_f1": f1,
-                    "date_correct": total_date_correct,
-                    "date_checked": total_date_checked,
-                    "date_accuracy": date_accuracy,
-                    "f1_threshold": F1_THRESHOLD,
-                    "date_accuracy_threshold": DATE_ACCURACY_THRESHOLD,
-                    "request_timeout_seconds": args.timeout_seconds,
-                    "llm_errors": llm_errors,
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        print(f"JSON report written to {report_path}")
-
     failed = False
     if f1 < F1_THRESHOLD:
         print(f"Below {F1_THRESHOLD:.0%} F1 threshold - review the extraction prompt/model.")
@@ -289,9 +271,6 @@ async def main() -> None:
             f"Below {DATE_ACCURACY_THRESHOLD:.0%} date-accuracy threshold - relative dates are "
             "resolving wrong (check the current-date grounding in the extraction prompt)."
         )
-        failed = True
-    if llm_errors:
-        print(f"{len(llm_errors)} case(s) could not be evaluated because the model provider failed.")
         failed = True
     if failed:
         sys.exit(1)

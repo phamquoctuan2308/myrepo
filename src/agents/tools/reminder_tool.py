@@ -25,8 +25,7 @@ async def create_reminder(
     state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
 ) -> str:
     """Draft a reminder that fires lead_minutes before due_at_iso. Requires the user's
-    explicit confirmation before it is actually scheduled. Never use this tool to schedule,
-    coordinate, facilitate, or conceal illegal/unsafe conduct; those requests are rejected.
+    explicit confirmation before it is actually scheduled.
 
     Args:
         title: Short title of the reminder.
@@ -38,7 +37,6 @@ async def create_reminder(
     policy = guardrail_service.evaluate_action_content(f"{title}\n{message}")
     if not policy.allowed:
         return policy.response
-
     decision = interrupt({"type": "reminder", "draft": draft})
     if not decision or not decision.get("approved"):
         return "Reminder was not scheduled (user declined)."
@@ -49,7 +47,6 @@ async def create_reminder(
     )
     if not policy.allowed:
         return policy.response
-
     user_id, workspace_id = _agent_identity(state)
     reminder = await reminder_service.schedule_reminder(
         workspace_id=workspace_id,
@@ -74,7 +71,105 @@ async def list_reminders(
     if not reminders:
         return "No reminders scheduled."
     return "\n".join(
-        f"- {guardrail_service.sanitize_untrusted_text(r.title)} "
+        f"- id={r.id}: {guardrail_service.sanitize_untrusted_text(r.title)} "
         f"({guardrail_service.sanitize_untrusted_text(r.status)}, due {r.due_at.isoformat()})"
         for r in reminders
     )
+
+
+@tool
+async def update_reminder(
+    reminder_id: str,
+    title: str | None = None,
+    due_at_iso: str | None = None,
+    lead_minutes: int | None = None,
+    message: str | None = None,
+    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
+) -> str:
+    """Update an independent reminder by id. Call list_reminders first if the id is unknown.
+    Requires explicit user confirmation."""
+
+    draft = {
+        "reminder_id": reminder_id,
+        "title": title,
+        "due_at": due_at_iso,
+        "lead_minutes": lead_minutes,
+        "message": message,
+    }
+    policy = guardrail_service.evaluate_action_content(f"{title or ''}\n{message or ''}")
+    if not policy.allowed:
+        return policy.response
+    decision = interrupt({"type": "reminder_update", "draft": draft})
+    if not decision or not decision.get("approved"):
+        return "Reminder was not updated (user declined)."
+    draft.update(decision.get("edits") or {})
+    user_id, workspace_id = _agent_identity(state)
+    try:
+        reminder = await reminder_service.update_reminder(
+            draft["reminder_id"],
+            owner_id=user_id,
+            workspace_id=workspace_id,
+            title=draft.get("title"),
+            due_at_iso=draft.get("due_at"),
+            lead_minutes=draft.get("lead_minutes"),
+            message=draft.get("message"),
+        )
+    except ValueError as exc:
+        return str(exc)
+    if reminder is None:
+        return "Reminder not found."
+    safe_title = guardrail_service.sanitize_untrusted_text(reminder.title)
+    return f"Reminder '{safe_title}' updated; it will fire at {reminder.fire_at.isoformat()}."
+
+
+@tool
+async def cancel_reminder(
+    reminder_id: str,
+    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
+) -> str:
+    """Cancel an independent reminder by id. Call list_reminders first if its id is unknown.
+    Requires explicit user confirmation."""
+
+    decision = interrupt({"type": "reminder_cancel", "draft": {"reminder_id": reminder_id}})
+    if not decision or not decision.get("approved"):
+        return "Reminder was not cancelled (user declined)."
+    user_id, workspace_id = _agent_identity(state)
+    try:
+        cancelled = await reminder_service.cancel_reminder(
+            reminder_id, owner_id=user_id, workspace_id=workspace_id
+        )
+    except ValueError as exc:
+        return str(exc)
+    return "Reminder cancelled." if cancelled else "Reminder not found."
+
+
+@tool
+async def snooze_reminder(
+    reminder_id: str,
+    minutes: int,
+    state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
+) -> str:
+    """Snooze an independent reminder by id for 1 to 10080 minutes. Requires explicit user
+    confirmation."""
+
+    decision = interrupt(
+        {"type": "reminder_snooze", "draft": {"reminder_id": reminder_id, "minutes": minutes}}
+    )
+    if not decision or not decision.get("approved"):
+        return "Reminder was not snoozed (user declined)."
+    edits = decision.get("edits") or {}
+    reminder_id = edits.get("reminder_id", reminder_id)
+    minutes = edits.get("minutes", minutes)
+    user_id, workspace_id = _agent_identity(state)
+    try:
+        reminder = await reminder_service.snooze_reminder(
+            reminder_id,
+            owner_id=user_id,
+            workspace_id=workspace_id,
+            minutes=minutes,
+        )
+    except ValueError as exc:
+        return str(exc)
+    if reminder is None:
+        return "Reminder not found."
+    return f"Reminder snoozed until {reminder.fire_at.isoformat()}."

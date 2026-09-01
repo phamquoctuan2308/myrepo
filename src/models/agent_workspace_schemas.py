@@ -100,5 +100,6 @@ class AgentWorkspaceConversationOut(BaseModel):
     agent_workspace_id: str
     conversation_id: str
     classification: Literal["delivery", "quality"]
+    channel_kind: Literal["announcement", "team", "project", "release"] = "project"
     linked_by_user_id: str
     created_at: datetime

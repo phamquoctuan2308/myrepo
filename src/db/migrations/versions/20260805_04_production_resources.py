@@ -36,55 +36,9 @@ def _foreign_key_targets(connection, table: str) -> set[tuple[str, str]]:
     return targets
 
 
-def _detach_forward_references(table: sa.Table, existing_tables: set[str]) -> list[tuple]:
-    """Temporarily strip any column that foreign-keys to a table not present yet, so `table` can
-    be created without a dangling reference. Returns what to pass to `_reattach` afterwards.
-
-    Base.metadata reflects today's ORM shape, which can be ahead of this migration's own place in
-    history - e.g. Task.agent_workspace_id targets `agent_workspaces`, a table this migration
-    predates by 12 revisions (added at 20260817_13). Creating that column here bakes in a
-    dangling FK that breaks SQLite's reflect-and-copy dance the very next step
-    (_harden_constraints' batch_alter_table) needs to do, and any replay of this migration
-    against a database where the table doesn't exist yet (a genuine legacy backfill, as opposed
-    to the normal path where the table was already created upstream). The migration that
-    actually owns such a column adds it back later with its own guarded
-    op.add_column/create_foreign_key (see 20260821_16 for `agent_workspace_id`).
-    """
-    detached = []
-    for column in list(table.columns):
-        if not any(fk.column.table.name not in existing_tables for fk in column.foreign_keys):
-            continue
-        indexes = [ix for ix in table.indexes if any(c.name == column.name for c in ix.columns)]
-        fk_constraints = [
-            fk for fk in table.foreign_key_constraints if any(c.name == column.name for c in fk.columns)
-        ]
-        for ix in indexes:
-            table.indexes.discard(ix)
-        for fk in fk_constraints:
-            table.constraints.discard(fk)
-        table._columns.remove(column)
-        detached.append((column, fk_constraints, indexes))
-    return detached
-
-
-def _reattach(table: sa.Table, detached: list[tuple]) -> None:
-    for column, fk_constraints, indexes in detached:
-        table._columns.add(column)
-        for fk in fk_constraints:
-            table.constraints.add(fk)
-        for ix in indexes:
-            table.indexes.add(ix)
-
-
 def _create_missing_tables(connection) -> None:
-    existing_tables = _tables(connection)
     for table_name in ("tasks", "usage_logs", "memories", "calendar_sync_state", "reminders"):
-        table = Base.metadata.tables[table_name]
-        detached = _detach_forward_references(table, existing_tables)
-        try:
-            table.create(bind=connection, checkfirst=True)
-        finally:
-            _reattach(table, detached)
+        Base.metadata.tables[table_name].create(bind=connection, checkfirst=True)
 
 
 def _add_user_profile_columns(connection) -> None:
@@ -171,7 +125,11 @@ def _add_resource_indexes(connection) -> None:
 def _harden_constraints(connection) -> None:
     for table in ("tasks", "memories", "reminders"):
         targets = _foreign_key_targets(connection, table)
-        with op.batch_alter_table(table) as batch_op:
+        # A fresh database is created from current metadata by revision 01.
+        # It can therefore contain a later FK whose target table has not yet
+        # been introduced by this historical revision. Reflection must not
+        # resolve that future FK while rebuilding this older table on SQLite.
+        with op.batch_alter_table(table, reflect_kwargs={"resolve_fks": False}) as batch_op:
             if ("workspace_id", "workspaces") not in targets:
                 batch_op.create_foreign_key(
                     f"fk_{table}_workspace_id_workspaces",

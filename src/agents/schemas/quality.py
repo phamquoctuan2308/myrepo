@@ -1,11 +1,24 @@
+"""Typed Quality Assurance contracts and deterministic release-gate rules."""
+
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
 from enum import StrEnum
 
 from pydantic import Field, model_validator
 
-from src.agents.contracts import FrozenContract, ReleaseReadiness
+from src.agents.contracts import (
+    AgentContext,
+    AgentIntent,
+    AgentProfile,
+    BusinessRole,
+    FrozenContract,
+    PolicyDecision,
+    ReleaseReadiness,
+    RequestedScope,
+    SourceReference,
+)
 
 
 class QualityWorkItemType(StrEnum):
@@ -29,27 +42,127 @@ class QualityStatus(StrEnum):
     BLOCKED = "blocked"
 
 
-class QualityReadinessReason(StrEnum):
-    CRITICAL_DEFECT_ACTIVE = "critical_defect_active"
-    REQUIRED_RELEASE_CHECK_MISSING = "required_release_check_missing"
-    REQUIRED_RELEASE_CHECK_FAILED = "required_release_check_failed"
-    REQUIRED_RELEASE_CHECK_PENDING = "required_release_check_pending"
-    NON_CRITICAL_DEFECT_ACTIVE = "non_critical_defect_active"
-    TEST_FAILURE_OR_BLOCKER = "test_failure_or_blocker"
-    NO_REQUIRED_RELEASE_CHECKS_DECLARED = "no_required_release_checks_declared"
-    ALL_REQUIRED_CHECKS_PASSED = "all_required_checks_passed"
+_QUALITY_STATUS_TRANSITIONS = {
+    QualityWorkItemType.BUG: {
+        QualityStatus.OPEN: frozenset({QualityStatus.TESTING, QualityStatus.BLOCKED}),
+        QualityStatus.TESTING: frozenset(
+            {QualityStatus.PASSED, QualityStatus.FAILED, QualityStatus.BLOCKED}
+        ),
+        QualityStatus.FAILED: frozenset({QualityStatus.OPEN, QualityStatus.TESTING, QualityStatus.BLOCKED}),
+        QualityStatus.BLOCKED: frozenset({QualityStatus.OPEN, QualityStatus.TESTING}),
+        QualityStatus.PASSED: frozenset({QualityStatus.OPEN}),
+    },
+    QualityWorkItemType.TEST_CASE: {
+        QualityStatus.OPEN: frozenset({QualityStatus.TESTING, QualityStatus.BLOCKED}),
+        QualityStatus.TESTING: frozenset(
+            {QualityStatus.PASSED, QualityStatus.FAILED, QualityStatus.BLOCKED}
+        ),
+        QualityStatus.FAILED: frozenset({QualityStatus.TESTING}),
+        QualityStatus.BLOCKED: frozenset({QualityStatus.OPEN, QualityStatus.TESTING}),
+        QualityStatus.PASSED: frozenset({QualityStatus.TESTING}),
+    },
+    QualityWorkItemType.RELEASE_CHECK: {
+        QualityStatus.OPEN: frozenset({QualityStatus.TESTING, QualityStatus.BLOCKED}),
+        QualityStatus.TESTING: frozenset(
+            {QualityStatus.PASSED, QualityStatus.FAILED, QualityStatus.BLOCKED}
+        ),
+        QualityStatus.FAILED: frozenset({QualityStatus.TESTING}),
+        QualityStatus.BLOCKED: frozenset({QualityStatus.OPEN, QualityStatus.TESTING}),
+        QualityStatus.PASSED: frozenset({QualityStatus.TESTING}),
+    },
+}
+
+
+def quality_status_transition_allowed(
+    work_item_type: QualityWorkItemType,
+    current: QualityStatus,
+    requested: QualityStatus,
+) -> bool:
+    return current == requested or requested in _QUALITY_STATUS_TRANSITIONS[work_item_type][current]
+
+
+class QualityViewScope(StrEnum):
+    WORKSPACE = "workspace"
+    GROUP = "group"
+    MEMBER = "member"
+
+
+class QualityReadScope(FrozenContract):
+    context: AgentContext
+    release_id: str = Field(min_length=1, max_length=128)
+    view_scope: QualityViewScope
+    effective_group_ids: tuple[str, ...] = ()
+    selected_conversation_id: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_capability(self) -> QualityReadScope:
+        if self.context.runtime.agent_profile != AgentProfile.QUALITY_ASSURANCE:
+            raise ValueError("Quality reads require the quality_assurance profile")
+        if self.context.request.requested_scope != RequestedScope.WORKSPACE:
+            raise ValueError("Quality reads require workspace scope")
+        if self.context.request.intent not in {AgentIntent.QUALITY_READINESS, AgentIntent.QUALITY_BRIEF}:
+            raise ValueError("Quality reads require a Quality intent")
+        if self.context.authorization.decision != PolicyDecision.ALLOW:
+            raise ValueError("Quality reads require an allowed authorization context")
+        target = self.context.request.target_agent_workspace_id
+        if target is None or target not in self.context.authorization.allowed_agent_workspace_ids:
+            raise ValueError("Quality target workspace is not authorized")
+        if not set(self.effective_group_ids).issubset(self.context.authorization.allowed_resource_ids):
+            raise ValueError("Quality group scope exceeds the authorized resources")
+        if self.view_scope == QualityViewScope.WORKSPACE:
+            if self.context.actor.business_role != BusinessRole.LEAD:
+                raise ValueError("Only a Quality lead can request a workspace overview")
+            if self.selected_conversation_id is not None:
+                raise ValueError("A workspace overview cannot select one group")
+        elif self.view_scope == QualityViewScope.GROUP:
+            if self.context.actor.business_role != BusinessRole.LEAD:
+                raise ValueError("Only a Quality lead can select a group")
+            if self.effective_group_ids != (self.selected_conversation_id,):
+                raise ValueError("The selected group must be the only effective resource")
+        elif self.view_scope == QualityViewScope.MEMBER:
+            if self.context.actor.business_role != BusinessRole.MEMBER:
+                raise ValueError("A member view requires the member role")
+            if self.selected_conversation_id is not None:
+                raise ValueError("Members cannot select a group")
+        return self
 
 
 class QualityWorkItem(FrozenContract):
-    """Source-backed MVP representation of a bug, test case or release check."""
-
-    work_item_id: str = Field(min_length=1)
-    title: str = Field(min_length=1)
+    id: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=500)
     work_item_type: QualityWorkItemType
-    severity: QualitySeverity
+    severity: QualitySeverity | None = None
     quality_status: QualityStatus
-    source_id: str = Field(min_length=1)
-    release_id: str | None = None
+    release_id: str = Field(min_length=1, max_length=128)
+    required: bool = False
+    owner_id: str | None = Field(default=None, max_length=128)
+    sources: tuple[SourceReference, ...] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_domain_shape(self) -> QualityWorkItem:
+        if self.work_item_type == QualityWorkItemType.BUG and self.severity is None:
+            raise ValueError("A bug requires severity")
+        if self.work_item_type != QualityWorkItemType.BUG and self.severity is not None:
+            raise ValueError("Only a bug can have severity")
+        if self.required and self.work_item_type != QualityWorkItemType.RELEASE_CHECK:
+            raise ValueError("Only a release check can be required")
+        return self
+
+
+class QualityMessageEvidence(FrozenContract):
+    message_id: str = Field(min_length=1)
+    conversation_id: str = Field(min_length=1)
+    sender_id: str = Field(min_length=1)
+    sender_name: str = Field(min_length=1)
+    excerpt: str = Field(min_length=1, max_length=1_000)
+    created_at: datetime
+    source: SourceReference
+
+
+class QualityPerson(FrozenContract):
+    user_id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    job_title: str = ""
 
 
 class QualityTestProgress(FrozenContract):
@@ -60,137 +173,89 @@ class QualityTestProgress(FrozenContract):
     failed: int = Field(ge=0)
     blocked: int = Field(ge=0)
 
-    @model_validator(mode="after")
-    def status_counts_match_total(self) -> QualityTestProgress:
-        status_total = self.open + self.testing + self.passed + self.failed + self.blocked
-        if status_total != self.total:
-            raise ValueError("Quality test status counts must add up to total")
-        return self
-
-
-class QualityItemFinding(FrozenContract):
-    work_item_id: str = Field(min_length=1)
-    title: str = Field(min_length=1)
-    severity: QualitySeverity
-    quality_status: QualityStatus
-    source_id: str = Field(min_length=1)
-
 
 class QualityReadinessAssessment(FrozenContract):
-    """Validated Day-1 readiness output; WorkspaceBrief wrapping is a later slice."""
-
+    release_id: str
     release_readiness: ReleaseReadiness
     test_progress: QualityTestProgress
-    critical_defects: tuple[QualityItemFinding, ...] = ()
-    blocked_tests: tuple[QualityItemFinding, ...] = ()
-    quality_risks: tuple[QualityItemFinding, ...] = ()
-    reasons: tuple[QualityReadinessReason, ...]
+    critical_defects: tuple[QualityWorkItem, ...] = ()
+    blocked_tests: tuple[QualityWorkItem, ...] = ()
+    risks: tuple[QualityWorkItem, ...] = ()
+    reasons: tuple[str, ...]
     data_gaps: tuple[str, ...] = ()
-    source_ids: tuple[str, ...] = ()
 
     @model_validator(mode="after")
-    def assessment_has_consistent_evidence(self) -> QualityReadinessAssessment:
-        if not self.reasons:
-            raise ValueError("A readiness assessment requires at least one reason")
-        if len(set(self.reasons)) != len(self.reasons):
-            raise ValueError("Readiness reasons must be unique")
-        if len(set(self.source_ids)) != len(self.source_ids):
-            raise ValueError("source_ids must be unique")
-        finding_source_ids = {
-            finding.source_id
-            for findings in (self.critical_defects, self.blocked_tests, self.quality_risks)
-            for finding in findings
-        }
-        if not finding_source_ids.issubset(self.source_ids):
-            raise ValueError("Every finding must reference an assessment source_id")
+    def ready_requires_complete_data(self) -> QualityReadinessAssessment:
         if self.release_readiness == ReleaseReadiness.READY and self.data_gaps:
-            raise ValueError("READY cannot be emitted while readiness data gaps remain")
+            raise ValueError("READY cannot be emitted with data gaps")
         return self
 
 
-class QualitySnapshotItem(FrozenContract):
-    """Normalized, source-backed record returned by a scoped Quality repository."""
+def evaluate_release_readiness(
+    items: tuple[QualityWorkItem, ...], *, release_id: str, extra_data_gaps: tuple[str, ...] = ()
+) -> QualityReadinessAssessment:
+    """Evaluate one release only; the LLM cannot alter this result."""
 
-    work_item_id: str = Field(min_length=1)
-    title: str = Field(min_length=1)
-    work_item_type: QualityWorkItemType
-    severity: QualitySeverity
-    quality_status: QualityStatus
-    source_id: str = Field(min_length=1)
-    agent_workspace_id: str = Field(min_length=1)
-    organization_workspace_id: str = Field(min_length=1)
-    captured_at: datetime
-    release_id: str | None = None
-    owner_display_name: str | None = Field(default=None, min_length=1, max_length=200)
+    if any(item.release_id != release_id for item in items):
+        raise ValueError("A readiness assessment cannot mix releases")
+    tests = tuple(
+        item for item in items if item.work_item_type in {QualityWorkItemType.TEST_CASE, QualityWorkItemType.RELEASE_CHECK}
+    )
+    counts = Counter(item.quality_status for item in tests)
+    progress = QualityTestProgress(
+        total=len(tests),
+        open=counts[QualityStatus.OPEN],
+        testing=counts[QualityStatus.TESTING],
+        passed=counts[QualityStatus.PASSED],
+        failed=counts[QualityStatus.FAILED],
+        blocked=counts[QualityStatus.BLOCKED],
+    )
+    active = {QualityStatus.OPEN, QualityStatus.TESTING, QualityStatus.FAILED, QualityStatus.BLOCKED}
+    failed = {QualityStatus.FAILED, QualityStatus.BLOCKED}
+    pending = {QualityStatus.OPEN, QualityStatus.TESTING}
+    active_bugs = tuple(item for item in items if item.work_item_type == QualityWorkItemType.BUG and item.quality_status in active)
+    critical = tuple(item for item in active_bugs if item.severity == QualitySeverity.CRITICAL)
+    non_critical = tuple(item for item in active_bugs if item.severity != QualitySeverity.CRITICAL)
+    blocked_tests = tuple(item for item in tests if item.quality_status in failed)
+    required_checks = tuple(item for item in items if item.work_item_type == QualityWorkItemType.RELEASE_CHECK and item.required)
+    failed_required = tuple(item for item in required_checks if item.quality_status in failed)
+    pending_required = tuple(item for item in required_checks if item.quality_status in pending)
+    pending_tests = tuple(item for item in tests if item.quality_status in pending)
 
-    @model_validator(mode="after")
-    def captured_at_is_timezone_aware(self) -> QualitySnapshotItem:
-        if self.captured_at.tzinfo is None:
-            raise ValueError("captured_at must include a timezone")
-        return self
+    reasons: list[str] = []
+    gaps = list(extra_data_gaps)
+    if critical:
+        reasons.append("critical_defect_active")
+    if failed_required:
+        reasons.append("required_release_check_failed")
+    if not required_checks:
+        reasons.append("no_required_release_checks_declared")
+        gaps.append(f"No required release checks are declared for release {release_id}")
+    if critical or failed_required:
+        readiness = ReleaseReadiness.NOT_READY
+    else:
+        if pending_required:
+            reasons.append("required_release_check_pending")
+        if pending_tests:
+            reasons.append("test_execution_incomplete")
+        if non_critical:
+            reasons.append("non_critical_defect_active")
+        if blocked_tests:
+            reasons.append("test_failure_or_blocker")
+        if gaps and not reasons:
+            reasons.append("incomplete_quality_data")
+        readiness = ReleaseReadiness.AT_RISK if reasons or gaps else ReleaseReadiness.READY
+        if readiness == ReleaseReadiness.READY:
+            reasons.append("all_required_checks_passed")
 
-    def as_work_item(self) -> QualityWorkItem:
-        return QualityWorkItem(
-            work_item_id=self.work_item_id,
-            title=self.title,
-            work_item_type=self.work_item_type,
-            severity=self.severity,
-            quality_status=self.quality_status,
-            source_id=self.source_id,
-            release_id=self.release_id,
-        )
-
-
-class QualitySnapshot(FrozenContract):
-    agent_workspace_id: str = Field(min_length=1)
-    work_items: tuple[QualitySnapshotItem, ...] = ()
-    test_progress: QualityTestProgress
-    generated_at: datetime
-    freshest_source_at: datetime | None = None
-    data_gaps: tuple[str, ...] = ()
-
-    @model_validator(mode="after")
-    def snapshot_is_consistent(self) -> QualitySnapshot:
-        if self.generated_at.tzinfo is None:
-            raise ValueError("generated_at must include a timezone")
-        if self.freshest_source_at is not None and self.freshest_source_at.tzinfo is None:
-            raise ValueError("freshest_source_at must include a timezone")
-        if any(item.agent_workspace_id != self.agent_workspace_id for item in self.work_items):
-            raise ValueError("Every snapshot item must belong to the scoped agent workspace")
-        expected_total = sum(
-            item.work_item_type in {QualityWorkItemType.TEST_CASE, QualityWorkItemType.RELEASE_CHECK}
-            for item in self.work_items
-        )
-        if self.test_progress.total != expected_total:
-            raise ValueError("test_progress total must match snapshot test and release-check items")
-        return self
-
-
-class QualityEvidenceExcerpt(FrozenContract):
-    message_id: str = Field(min_length=1)
-    source_id: str = Field(min_length=1)
-    excerpt: str = Field(min_length=1, max_length=1000)
-    captured_at: datetime
-
-    @model_validator(mode="after")
-    def evidence_timestamp_is_timezone_aware(self) -> QualityEvidenceExcerpt:
-        if self.captured_at.tzinfo is None:
-            raise ValueError("captured_at must include a timezone")
-        return self
-
-
-class QualityEvidence(FrozenContract):
-    agent_workspace_id: str = Field(min_length=1)
-    query: str = Field(min_length=1, max_length=500)
-    excerpts: tuple[QualityEvidenceExcerpt, ...] = ()
-    generated_at: datetime
-    freshest_source_at: datetime | None = None
-    data_gaps: tuple[str, ...] = ()
-
-    @model_validator(mode="after")
-    def evidence_timestamps_are_timezone_aware(self) -> QualityEvidence:
-        if self.generated_at.tzinfo is None:
-            raise ValueError("generated_at must include a timezone")
-        if self.freshest_source_at is not None and self.freshest_source_at.tzinfo is None:
-            raise ValueError("freshest_source_at must include a timezone")
-        return self
+    risk_items = tuple(dict.fromkeys((*non_critical, *pending_tests)))
+    return QualityReadinessAssessment(
+        release_id=release_id,
+        release_readiness=readiness,
+        test_progress=progress,
+        critical_defects=critical,
+        blocked_tests=blocked_tests,
+        risks=risk_items,
+        reasons=tuple(dict.fromkeys(reasons)),
+        data_gaps=tuple(dict.fromkeys(gaps)),
+    )

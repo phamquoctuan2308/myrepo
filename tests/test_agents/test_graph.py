@@ -24,6 +24,79 @@ async def test_agent_basic_flow_no_tool_call(monkeypatch, fake_llm_factory):
 
 
 @pytest.mark.asyncio
+async def test_capability_help_is_answered_without_calling_llm(monkeypatch):
+    def llm_must_not_run(*args, **kwargs):
+        raise AssertionError("capability help must not call an LLM")
+
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", llm_must_not_run)
+    monkeypatch.setattr(
+        "src.agents.nodes.guardrail_node.domain_classifier_service.classify_domain_request",
+        llm_must_not_run,
+    )
+
+    result = await agent_graph.agent.ainvoke(
+        {"messages": [HumanMessage(content="Bạn có thể giúp tôi những việc gì?")]},
+        _config(),
+    )
+
+    assert result["guardrail_blocked"] is False
+    assert result["personal_intent"] == "capability_help"
+    assert result["routing_strategy"] == "deterministic"
+    assert result["metadata"]["capability_response"]["source"] == "deterministic"
+    assert "task/deadline" in result["messages"][-1].content
+    assert "Google Calendar" in result["messages"][-1].content
+    assert "xác nhận" in result["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_typed_confirmation_continues_calendar_intent_from_short_term_history(
+    monkeypatch,
+    fake_llm_factory,
+):
+    from unittest.mock import AsyncMock
+
+    from src.services import calendar_service
+
+    monkeypatch.setattr(calendar_service, "find_conflicts", AsyncMock(return_value=[]))
+    llm = fake_llm_factory(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "create_calendar_event",
+                        "args": {
+                            "summary": "[E2E] Daily sync",
+                            "start_iso": "2026-09-01T10:00:00+07:00",
+                            "end_iso": "2026-09-01T10:30:00+07:00",
+                        },
+                        "id": "short-term-calendar",
+                    }
+                ],
+            )
+        ]
+    )
+    monkeypatch.setattr("src.agents.nodes.planner_node.get_llm", lambda: llm)
+
+    result = await agent_graph.agent.ainvoke(
+        {
+            "messages": [
+                HumanMessage(content="Đặt lịch Daily sync lúc 10 giờ sáng mai trong 30 phút"),
+                AIMessage(content='Vui lòng trả lời “Xác nhận” để tạo lịch.'),
+                HumanMessage(content="xác nhận"),
+            ],
+            "personal_intent": "calendar",
+            "user_id": "user-1",
+            "workspace_id": "workspace-1",
+        },
+        _config(),
+    )
+
+    assert result["__interrupt__"][0].value["type"] == "calendar_event"
+    assert result["metadata"]["query_route"]["reason_code"] == "THREAD_FOLLOW_UP_INTENT"
+
+
+@pytest.mark.asyncio
 async def test_agent_interrupt_then_resume_round_trip(monkeypatch, fake_llm_factory):
     """Drive the full interrupt -> resume round trip through the compiled graph,
     using create_calendar_event as the tool that pauses for confirmation."""
@@ -63,18 +136,19 @@ async def test_agent_interrupt_then_resume_round_trip(monkeypatch, fake_llm_fact
     fake_service = None
     from unittest.mock import AsyncMock, MagicMock
 
-    from src.services import calendar_service
+    from src.services import calendar_service, reminder_service
 
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {"id": "evt-1"}
     monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
     monkeypatch.setattr(calendar_service, "authorize_calendar_access", AsyncMock())
     monkeypatch.setattr(calendar_service, "broadcast_change", AsyncMock())
+    monkeypatch.setattr(reminder_service, "reconcile_calendar_event_reminder", AsyncMock())
 
     config = _config()
     result = await agent_graph.agent.ainvoke(
         {
-            "messages": [HumanMessage(content="book a sync")],
+            "messages": [HumanMessage(content="book a 30 minute sync tomorrow at 10:00")],
             "user_id": "user-1",
             "workspace_id": "workspace-1",
         },

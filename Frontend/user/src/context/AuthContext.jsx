@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import * as authApi from '../api/auth'
 import { useToast } from './ToastContext'
+import { queryClient } from '../query/queryClient'
 
 const TOKEN_KEY = 'orbit_token'
 const AuthContext = createContext(null)
@@ -26,6 +27,16 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const data = await authApi.login({ email, password })
+    queryClient.clear()
+    localStorage.setItem(TOKEN_KEY, data.access_token)
+    setUser(data.user)
+    setToken(data.access_token)
+    return data
+  }
+
+  const loginDemo = async (accountKey) => {
+    const data = await authApi.demoLogin(accountKey)
+    queryClient.clear()
     localStorage.setItem(TOKEN_KEY, data.access_token)
     setUser(data.user)
     setToken(data.access_token)
@@ -33,11 +44,8 @@ export function AuthProvider({ children }) {
   }
 
   const register = async (email, password, display_name) => {
-    // POST /auth/register only creates the account (201, no token - see src/api/auth_routes.py)
-    // so the new account can't skip the same credential check every other sign-in goes through;
-    // log in right after with the same credentials to get a session, same as a returning user.
-    await authApi.register({ email, password, display_name })
-    const data = await authApi.login({ email, password })
+    const data = await authApi.register({ email, password, display_name })
+    queryClient.clear()
     localStorage.setItem(TOKEN_KEY, data.access_token)
     setUser(data.user)
     setToken(data.access_token)
@@ -46,6 +54,7 @@ export function AuthProvider({ children }) {
 
   const loginAdmin = async (email, password) => {
     const data = await authApi.adminLogin({ email, password })
+    queryClient.clear()
     localStorage.setItem(TOKEN_KEY, data.access_token)
     setUser(data.user)
     setToken(data.access_token)
@@ -59,6 +68,7 @@ export function AuthProvider({ children }) {
       display_name,
       bootstrap_key: bootstrapKey,
     })
+    queryClient.clear()
     localStorage.setItem(TOKEN_KEY, data.access_token)
     setUser(data.user)
     setToken(data.access_token)
@@ -69,6 +79,7 @@ export function AuthProvider({ children }) {
   // backend) - same as login/register above, just fed a Google ID token instead of a password.
   const loginWithGoogle = async (idToken) => {
     const data = await authApi.googleAuth(idToken)
+    queryClient.clear()
     localStorage.setItem(TOKEN_KEY, data.access_token)
     setUser(data.user)
     setToken(data.access_token)
@@ -76,6 +87,7 @@ export function AuthProvider({ children }) {
   }
 
   const logout = () => {
+    queryClient.clear()
     localStorage.removeItem(TOKEN_KEY)
     setToken(null)
     setUser(null)
@@ -93,7 +105,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, loading, isAdmin, login, loginAdmin, register, registerAdmin, loginWithGoogle, logout, updateProfile, changePassword }}
+      value={{ user, token, loading, isAdmin, login, loginDemo, loginAdmin, register, registerAdmin, loginWithGoogle, logout, updateProfile, changePassword }}
     >
       {children}
     </AuthContext.Provider>

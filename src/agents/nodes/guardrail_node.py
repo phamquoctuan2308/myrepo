@@ -37,7 +37,12 @@ async def input_guardrail_node(state: AgentState) -> dict:
     )
     # Conversation data is also a trust boundary. Reject hard-sensitive context before even the
     # semantic domain classifier sees the request, preserving the no-LLM path for hard policy.
-    if decision.category == "out_of_domain" or decision.allowed:
+    # Capability help is a fixed product answer and never reads conversation data. Do not let
+    # unrelated content in an open chat turn a harmless "what can you do?" question into a
+    # refusal; the deterministic response path receives none of that content.
+    if decision.category != "capability_help" and (
+        decision.category == "out_of_domain" or decision.allowed
+    ):
         if state.get("context"):
             context_decision = guardrail_service.evaluate_context(state["context"])
             if not context_decision.allowed:
@@ -49,6 +54,7 @@ async def input_guardrail_node(state: AgentState) -> dict:
             previous_user_text=previous_user,
             previous_assistant_text=previous_assistant,
             conversation_mode=bool(state.get("conversation_id")),
+            user_id=state.get("user_id"),
         )
         semantic_metadata = {
             "decision": semantic.decision,
@@ -80,20 +86,13 @@ async def input_guardrail_node(state: AgentState) -> dict:
                 "messages": [AIMessage(content=question)],
             }
         else:
-            # `semantic.reason` is free-text from the LLM classifier - the prompt asks for it in
-            # Vietnamese (domain_classifier_service._CLASSIFIER_PROMPT), but a small/cheap model
-            # doesn't reliably comply on every call, and any leftover English or stray punctuation
-            # here used to get spliced straight into the user-visible sentence below. Keep it only
-            # in `decision.reason` (metadata/logs), never in the response text the user reads -
-            # that way the visible message is deterministically Vietnamese regardless of what the
-            # model produced.
-            safe_reason = guardrail_service.sanitize_untrusted_text(semantic.reason).strip().rstrip(".!?")
+            safe_reason = guardrail_service.sanitize_untrusted_text(semantic.reason).strip()
             decision = guardrail_service.GuardrailDecision(
                 False, "out_of_domain", safe_reason,
                 (
-                    "Orbit không thể hỗ trợ yêu cầu này vì đây không phải công việc, lịch, "
-                    "nhiệm vụ, memory hay phân tích một cuộc trò chuyện đã được cấp quyền — "
-                    "phạm vi duy nhất Orbit hỗ trợ."
+                    f"Orbit không thể hỗ trợ yêu cầu này vì {safe_reason}. "
+                    "Orbit tập trung vào công việc, lịch, nhiệm vụ, memory và phân tích "
+                    "các cuộc trò chuyện đã được cấp quyền."
                 ),
             )
     metadata = {

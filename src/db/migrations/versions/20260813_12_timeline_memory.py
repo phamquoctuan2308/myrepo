@@ -69,11 +69,23 @@ def upgrade() -> None:
         if "last_accessed_at" not in columns:
             batch_op.add_column(sa.Column("last_accessed_at", sa.DateTime(timezone=True), nullable=True))
 
-    memory_inspector = sa.inspect(connection)
-    index_names = {index["name"] for index in memory_inspector.get_indexes("memories")}
-    check_names = {
-        constraint.get("name")
-        for constraint in memory_inspector.get_check_constraints("memories")
+    # Legacy deployments used values such as ``fact`` before governed memory
+    # types existed. Normalize them before adding the database constraint so a
+    # valid pre-existing row cannot make the whole migration rollback.
+    connection.execute(
+        sa.text(
+            "UPDATE memories SET memory_type = 'semantic' "
+            "WHERE memory_type IS NULL OR memory_type NOT IN "
+            "('preference', 'relationship', 'episodic', 'semantic')"
+        )
+    )
+
+    inspector = sa.inspect(connection)
+    index_names = {index["name"] for index in inspector.get_indexes("memories")}
+    constraint_names = {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints("memories")
+        if constraint.get("name")
     }
     with op.batch_alter_table("memories") as batch_op:
         if "ix_memories_owner_type_expiry" not in index_names:
@@ -82,12 +94,12 @@ def upgrade() -> None:
                 ["owner_id", "memory_type", "expires_at"],
                 unique=False,
             )
-        if "ck_memory_type" not in check_names:
+        if "ck_memory_type" not in constraint_names:
             batch_op.create_check_constraint(
                 "ck_memory_type",
                 "memory_type IN ('preference', 'relationship', 'episodic', 'semantic')",
             )
-        if "ck_memory_sensitivity" not in check_names:
+        if "ck_memory_sensitivity" not in constraint_names:
             batch_op.create_check_constraint(
                 "ck_memory_sensitivity", "sensitivity IN ('normal', 'sensitive')"
             )

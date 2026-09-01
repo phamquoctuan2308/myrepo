@@ -22,8 +22,14 @@ class AgentState(TypedDict, total=False):
     response: str
     error: str
     metadata: dict
+    # Deterministic pre/post LLM policy checks. These flags make a blocked turn terminal
+    # without allowing it to reach the planner or any tool.
     guardrail_blocked: bool
     guardrail_requires_clarification: bool
+    personal_intent: str
+    routing_strategy: str
+    personal_plan: dict
+    action_requires_clarification: bool
     user_id: str | None  # id of the user driving this run, for tools that push WS updates to them
     workspace_id: str | None  # active workspace for tenant-scoped tools
     trace_id: str | None
@@ -41,13 +47,6 @@ class AgentState(TypedDict, total=False):
     consent_scope_hash: str | None
     source_message_ids: list[str]
     thread_summary: str
-    thread_id: str | None
-    user_context: dict
-    memory_context: str
-    episodic_context: str
-    conversation_summary_context: str
-    prompt_messages: list[AnyMessage]
-    context_metadata: dict
 
     # Tool-calling planner loop (messages, ToolNode, tools_condition all require this).
     messages: Annotated[list[AnyMessage], add_messages]

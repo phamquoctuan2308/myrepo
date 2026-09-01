@@ -57,7 +57,7 @@ async def test_create_reminder_interrupts_then_schedules(
     config = _config()
     result = await agent_graph.agent.ainvoke(
         {
-            "messages": [HumanMessage(content="remind me")],
+            "messages": [HumanMessage(content="remind me tomorrow at 14:30")],
             "user_id": user["id"],
             "workspace_id": personal_workspace["id"],
         },

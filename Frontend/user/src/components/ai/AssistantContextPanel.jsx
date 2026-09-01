@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useWorkspace } from '../../context/WorkspaceContext'
-import { listConversations } from '../../api/chat'
-import { listTasks } from '../../api/tasks'
 import { listCalendarEvents } from '../../api/calendar'
-import { listMemories } from '../../api/memories'
+import { useConversationsQuery } from '../../hooks/useWorkspaceData'
+import { useMemoriesQuery, useTasksQuery } from '../../hooks/usePersonalData'
+import { queryKeys } from '../../query/queryClient'
 import { groupTasks } from '../../utils/taskGrouping'
 import { formatClock, formatDateShort } from '../../utils/datetime'
 
@@ -18,27 +19,29 @@ const attentionLabel = (task, overdueIds, dueSoonIds) => {
   return { text: task.priority, tone: 'primary' }
 }
 
-export default function AssistantContextPanel({ open, onClose }) {
+export default function AssistantContextPanel({ open, width, resizing, onClose, onCollapse, onResizeStart }) {
   const { token } = useAuth()
   const { workspaceId } = useWorkspace()
   const navigate = useNavigate()
-  const [conversationsCount, setConversationsCount] = useState(null)
-  const [tasks, setTasks] = useState([])
-  const [events, setEvents] = useState([])
-  const [calendarConnected, setCalendarConnected] = useState(true)
-  const [memories, setMemories] = useState([])
-
-  useEffect(() => {
-    if (!token || !workspaceId) return
+  const dateRange = useMemo(() => {
     const now = new Date()
     const weekAhead = new Date(now.getTime() + 7 * 24 * 3600 * 1000)
-    listConversations(token, workspaceId).then(d => setConversationsCount(d.conversations.length)).catch(() => setConversationsCount(null))
-    listTasks(token, workspaceId).then(setTasks).catch(() => setTasks([]))
-    listCalendarEvents(token, { time_min: now.toISOString(), time_max: weekAhead.toISOString() })
-      .then(setEvents)
-      .catch(err => { setEvents([]); setCalendarConnected(err?.status !== 409) })
-    listMemories(token, workspaceId).then(setMemories).catch(() => setMemories([]))
-  }, [token, workspaceId])
+    return { time_min: now.toISOString(), time_max: weekAhead.toISOString() }
+  }, [])
+  const conversationsQuery = useConversationsQuery(token, workspaceId)
+  const tasksQuery = useTasksQuery(token)
+  const memoriesQuery = useMemoriesQuery(token)
+  const calendarQuery = useQuery({
+    queryKey: queryKeys.calendarEvents(dateRange.time_min, dateRange.time_max),
+    queryFn: () => listCalendarEvents(token, dateRange),
+    enabled: Boolean(token),
+    staleTime: 30_000,
+  })
+  const conversationsCount = conversationsQuery.data?.conversations?.length ?? null
+  const tasks = tasksQuery.items
+  const events = calendarQuery.data || []
+  const calendarConnected = calendarQuery.error?.status !== 409
+  const memories = memoriesQuery.items
 
   const openTasksCount = tasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length
   const { overdue, dueSoon, highPriority } = groupTasks(tasks)
@@ -49,14 +52,15 @@ export default function AssistantContextPanel({ open, onClose }) {
   const latestMemory = [...memories].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
 
   const contextSources = [
-    { icon: 'bi-chat-dots', label: 'Cuộc trò chuyện', value: conversationsCount ?? '—', color: '#526ff5' },
-    { icon: 'bi-check2-square', label: 'Task đang mở', value: openTasksCount, color: '#8b5cf6' },
-    { icon: 'bi-calendar4-week', label: 'Sự kiện tuần này', value: calendarConnected ? events.length : '—', color: '#10b981' },
+    { icon: 'bi-chat-dots', label: 'Trò chuyện', value: conversationsCount ?? '—', color: '#526ff5' },
+    { icon: 'bi-check2-square', label: 'Task mở', value: openTasksCount, color: '#8b5cf6' },
+    { icon: 'bi-calendar4-week', label: 'Sự kiện', value: calendarConnected ? events.length : '—', color: '#10b981' },
     { icon: 'bi-journal-bookmark', label: 'Memory', value: memories.length, color: '#f59e0b' },
   ]
 
   return <><div className={`context-backdrop ${open?'show':''}`} onClick={onClose}/><aside className={`assistant-context ${open?'open':''}`}>
-    <div className="context-title"><div><span>Bối cảnh của bạn</span><h3>Tổng quan hôm nay</h3></div><button className="icon-btn context-close" onClick={onClose}><i className="bi bi-x-lg"/></button></div>
+    <div className={`context-resize-handle ${resizing ? 'active' : ''}`} role="separator" aria-label="Kéo để thay đổi độ rộng bảng tổng quan" aria-orientation="vertical" title="Kéo sang trái hoặc phải để đổi độ rộng" data-width={`${width}px`} onPointerDown={onResizeStart}><span><i className="bi bi-grip-vertical"/></span></div>
+    <div className="context-title"><div><span>Bối cảnh của bạn</span><h3>Tổng quan hôm nay</h3></div><div className="context-title-actions"><button className="icon-btn context-collapse-btn" onClick={onCollapse} aria-label="Ẩn bảng tổng quan để mở rộng vùng chat" title="Ẩn bảng tổng quan"><i className="bi bi-layout-sidebar-inset-reverse"/></button><button className="icon-btn context-close" onClick={onClose} aria-label="Đóng bảng tổng quan"><i className="bi bi-x-lg"/></button></div></div>
     <div className="context-source-grid">{contextSources.map(x=><div key={x.label}><span style={{background:`${x.color}12`,color:x.color}}><i className={`bi ${x.icon}`}/></span><strong>{x.value}</strong><small>{x.label}</small></div>)}</div>
     <section className="context-section">
       <div className="context-section-head"><h4><i className="bi bi-calendar-event"/> Tiếp theo</h4><button onClick={()=>navigate('/calendar')}>Xem lịch</button></div>
@@ -67,13 +71,13 @@ export default function AssistantContextPanel({ open, onClose }) {
     <section className="context-section">
       <div className="context-section-head"><h4><i className="bi bi-check2-square"/> Cần chú ý</h4><button onClick={()=>navigate('/tasks/inbox')}>Xem task</button></div>
       {attention.length === 0 && <p className="context-empty">Không có task nào cần chú ý.</p>}
-      <div className="attention-list">{attention.map(t=>{
+      {attention.length > 0 && <div className="attention-list">{attention.map(t=>{
         const label = attentionLabel(t, overdueIds, dueSoonIds)
         return <div key={t.id}><span className={`attention-dot ${label.tone}`}/><p><strong>{t.title}</strong><small>{t.due_at ? formatDateShort(t.due_at) : 'Không có hạn'}</small></p><b>{label.text}</b></div>
-      })}</div>
+      })}</div>}
     </section>
     <section className="context-section">
-      <div className="context-section-head"><h4><i className="bi bi-journal-bookmark"/> Memory mới nhất</h4><button onClick={()=>navigate('/memory')}>Xem tất cả</button></div>
+      <div className="context-section-head"><h4><i className="bi bi-journal-bookmark"/> Memory liên quan</h4><button onClick={()=>navigate('/memory')}>Xem tất cả</button></div>
       {!latestMemory && <p className="context-empty">Chưa có memory nào.</p>}
       {latestMemory && <div className="related-memory"><i className="bi bi-lightbulb"/><p>{latestMemory.detail || latestMemory.title}</p></div>}
     </section>

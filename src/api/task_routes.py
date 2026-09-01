@@ -1,85 +1,99 @@
-import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, select
+from sqlalchemy import and_, case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
 from src.config import get_settings
-from src.db.models import Conversation, Message, Task, User, Workspace
+from src.db.models import (
+    AgentWorkspace,
+    AgentWorkspaceMembership,
+    Conversation,
+    ConversationParticipant,
+    Task,
+    User,
+    Workspace,
+    WorkspaceMembership,
+)
 from src.db.session import get_db
-from src.models.task_schemas import TaskCreateRequest, TaskOut, TaskSourceMessageOut, UpdateTaskStatusRequest
-from src.services import calendar_service, consent_service, reminder_service
+from src.models.task_schemas import (
+    TaskCreateRequest,
+    TaskOut,
+    TaskSubmissionRequest,
+    UpdateTaskRequest,
+    UpdateTaskStatusRequest,
+)
+from src.services import consent_service, reminder_service
+from src.services.audit_service import record_audit_event
 from src.services.authorization_service import require_conversation_access
-from src.services.google_credentials import CalendarNotConnectedError
 from src.services.workspace_service import resolve_workspace_for_user
 from src.websocket.manager import manager
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _PRIORITY_RANK = {"High": 0, "Medium": 1, "Low": 2}
-# Task only carries a single due_at, not a start/end range, so an accepted AI suggestion gets a
-# fixed-length placeholder event on Google Calendar - same convention as a quick manual add. The
-# user can always resize/edit it afterwards from the Calendar page.
-_ACCEPTED_TASK_EVENT_DURATION = timedelta(minutes=30)
-# Upper bound on how long before an accepted task's due_at its synced Reminder fires - same
-# default the manual "New reminder" form and the agent's create_reminder tool both use.
-# _reminder_lead_minutes below caps this further when due_at is too soon for the full 30 minutes.
-_ACCEPTED_TASK_REMINDER_LEAD_MINUTES = 30
+_OWNER_TRANSITIONS = {
+    "suggested": {"pending", "dismissed"},
+    "pending": {"in_progress", "blocked", "completed", "dismissed"},
+    "in_progress": {"pending", "blocked", "completed"},
+    "blocked": {"pending", "in_progress"},
+    "submitted": set(),
+    "changes_requested": {"in_progress", "blocked"},
+    "completed": {"in_progress"},
+    "dismissed": set(),
+    "invalidated": set(),
+}
 
-def _to_out(task: Task, *, due_at_override=None, source_messages=None) -> TaskOut:
+
+def _to_out(
+    task: Task,
+    *,
+    due_at_override=None,
+    workspace: Workspace | None = None,
+    agent_workspace: AgentWorkspace | None = None,
+    conversation: Conversation | None = None,
+) -> TaskOut:
     due_at = due_at_override if due_at_override is not None else task.due_at
     if due_at is not None and due_at.tzinfo is None:
         due_at = due_at.replace(tzinfo=ZoneInfo(get_settings().calendar_timezone))
     return TaskOut(
         id=task.id,
         workspace_id=task.workspace_id,
+        owner_id=task.owner_id,
         conversation_id=task.conversation_id,
+        agent_workspace_id=task.agent_workspace_id,
+        workspace_type=workspace.type if workspace is not None else None,
+        workspace_name=workspace.name if workspace is not None else None,
+        agent_workspace_name=agent_workspace.name if agent_workspace is not None else None,
+        agent_profile=agent_workspace.agent_profile if agent_workspace is not None else None,
+        conversation_name=conversation.name if conversation is not None else None,
         title=task.title,
         due_at=due_at,
+        auto_reminder_enabled=task.auto_reminder_enabled,
         priority=task.priority,
         status=task.status,
+        blocked_reason=task.blocked_reason,
         source=task.source,
         source_message_ids=task.source_message_ids,
         consent_scope_hash=task.consent_scope_hash,
         invalidated_reason=task.invalidated_reason,
-        calendar_event_id=task.calendar_event_id,
-        reminder_id=task.reminder_id,
-        source_messages=source_messages,
+        requires_review=task.requires_review,
+        submission_note=task.submission_note,
+        evidence_urls=list(task.evidence_urls or []),
+        submitted_by_user_id=task.submitted_by_user_id,
+        submitted_at=task.submitted_at,
+        reviewed_by_user_id=task.reviewed_by_user_id,
+        reviewed_at=task.reviewed_at,
+        review_note=task.review_note,
+        row_version=task.row_version,
         created_at=task.created_at,
         updated_at=task.updated_at,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
     )
-
-
-async def _load_source_messages(
-    db: AsyncSession, tasks: list[Task]
-) -> dict[str, list[TaskSourceMessageOut]]:
-    """Batch-fetch the messages behind every task's source_message_ids in one query, for the "why
-    did Orbit suggest this" hover detail on a suggestion card. source_message_ids[0] is always the
-    proposal message (see proactive_service.py), so callers can read source_messages[0].sender_name
-    as "who proposed this" without a separate field."""
-    all_ids = {message_id for task in tasks for message_id in (task.source_message_ids or [])}
-    if not all_ids:
-        return {}
-    rows = (
-        await db.execute(
-            select(Message, User).join(User, User.id == Message.sender_id).where(Message.id.in_(all_ids))
-        )
-    ).all()
-    by_id = {
-        message.id: TaskSourceMessageOut(
-            sender_name=sender.display_name, content=message.content, created_at=message.created_at
-        )
-        for message, sender in rows
-    }
-    return {
-        task.id: [by_id[message_id] for message_id in (task.source_message_ids or []) if message_id in by_id]
-        for task in tasks
-        if task.source_message_ids
-    }
 
 
 async def _get_own_task_or_404(task_id: str, current_user: User, db: AsyncSession) -> Task:
@@ -88,15 +102,23 @@ async def _get_own_task_or_404(task_id: str, current_user: User, db: AsyncSessio
     ).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    # Same workspace_id caveat as list_tasks below: a task proactively suggested to a participant
-    # of a personal-workspace conversation can legitimately carry a *different* participant's
-    # personal workspace_id. `owner_id` above already proved this task is this user's own -
-    # re-validating workspace membership on top of that only makes sense for an organization
-    # workspace, where it's a real multi-tenant boundary. Without this, Accept/Dismiss on a
-    # proactively-suggested task raised "Workspace access denied" for its own owner.
-    workspace = await db.get(Workspace, task.workspace_id)
-    if workspace is not None and workspace.type == "organization":
-        await resolve_workspace_for_user(db, current_user.id, task.workspace_id)
+    await resolve_workspace_for_user(db, current_user.id, task.workspace_id)
+    if task.agent_workspace_id is not None:
+        active_agent_membership = await db.scalar(
+            select(AgentWorkspaceMembership.id)
+            .join(AgentWorkspace, AgentWorkspace.id == AgentWorkspaceMembership.agent_workspace_id)
+            .where(
+                AgentWorkspaceMembership.agent_workspace_id == task.agent_workspace_id,
+                AgentWorkspaceMembership.user_id == current_user.id,
+                AgentWorkspaceMembership.status == "active",
+                AgentWorkspace.organization_workspace_id == task.workspace_id,
+                AgentWorkspace.status == "active",
+            )
+        )
+        if active_agent_membership is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if task.conversation_id is not None:
+        await require_conversation_access(db, current_user, task.conversation_id, "participant")
     return task
 
 
@@ -137,112 +159,95 @@ async def _require_current_ai_provenance(task: Task, db: AsyncSession) -> None:
         )
 
 
-async def _sync_task_to_calendar(task: Task, current_user: User) -> None:
-    """Accepting an AI-suggested task auto-creates the matching Google Calendar event - the
-    Accept click itself is the human confirmation this product's human-in-the-loop rule
-    requires before writing to Calendar (product decision: Accept = confirm-and-sync, no
-    separate dialog). Never blocks Accept though: if the task has no due_at, already has an
-    event, the user hasn't connected Google Calendar, or the API call fails, the task is still
-    accepted and the failure is only logged.
-    """
-    if task.source not in {"proactive", "ai_extracted"} or task.due_at is None or task.calendar_event_id:
-        return
-    due_at = task.due_at
-    if due_at.tzinfo is None:
-        due_at = due_at.replace(tzinfo=ZoneInfo(get_settings().calendar_timezone))
-    end_at = due_at + _ACCEPTED_TASK_EVENT_DURATION
-    try:
-        created = await calendar_service.create_event(
-            current_user.id,
-            task.title,
-            due_at.isoformat(),
-            end_at.isoformat(),
-            "Automatically synced from an accepted Orbit task suggestion.",
-        )
-    except CalendarNotConnectedError:
-        return
-    except Exception:  # noqa: BLE001 - accepting the task must never fail because Calendar did
-        logger.exception("Could not auto-sync accepted task %s to Google Calendar", task.id)
-        return
-    task.calendar_event_id = created.get("id")
-    await calendar_service.broadcast_change(
-        current_user.id, "calendar_event_created", {"event": calendar_service.to_out_dict(created)}
-    )
-
-
-def _reminder_lead_minutes(due_at) -> int:
-    """Cap the default lead time to what's actually left before due_at, so a task due soon (but
-    still genuinely in the future) doesn't silently lose its reminder just because a fixed
-    30-minute lead would push the notification time itself into the past. Only a due_at that's
-    already at or past now falls through unchanged - schedule_reminder still rejects that one, as
-    it should.
-    """
-    due = due_at if due_at.tzinfo else due_at.replace(tzinfo=ZoneInfo(get_settings().calendar_timezone))
-    remaining_minutes = (due.astimezone(UTC) - datetime.now(UTC)).total_seconds() / 60
-    if remaining_minutes <= 0:
-        return _ACCEPTED_TASK_REMINDER_LEAD_MINUTES
-    return max(1, min(_ACCEPTED_TASK_REMINDER_LEAD_MINUTES, int(remaining_minutes // 2)))
-
-
-async def _sync_task_to_reminder(task: Task, current_user: User, db: AsyncSession) -> None:
-    """Same "Accept = confirm-and-sync" product decision as _sync_task_to_calendar above, applied
-    to Reminders instead: the Accept click is the explicit human confirmation, so the reminder is
-    scheduled directly with no separate dialog. Unlike Calendar sync this never depends on a
-    connected external account, but it still must never block Accept: a due_at that's already at
-    or past now (see _reminder_lead_minutes) raises ValueError, which is only logged.
-
-    Deliberately does NOT reuse task.workspace_id: a proactive/ai_extracted task can legitimately
-    carry a different personal workspace_id than the accepting user's own (see list_tasks's
-    comment on the same caveat) - GET /reminders filters strictly on owner_id AND workspace_id
-    (no personal-workspace exception like list_tasks has), so a reminder saved under the task's
-    workspace_id would silently never show up on the accepting user's own Reminders page. Resolve
-    the user's own workspace instead, exactly like reminder_routes.create_reminder does.
-    """
-    if task.source not in {"proactive", "ai_extracted"} or task.due_at is None or task.reminder_id:
-        return
-    try:
-        workspace = await resolve_workspace_for_user(db, current_user.id, None)
-        reminder = await reminder_service.schedule_reminder(
-            workspace_id=workspace.id,
-            owner_id=current_user.id,
-            title=task.title,
-            due_at_iso=task.due_at,
-            lead_minutes=_reminder_lead_minutes(task.due_at),
-            message="Automatically scheduled from an accepted Orbit task suggestion.",
-            source="proactive",
-        )
-    except ValueError:
-        logger.info("Skipped reminder sync for task %s: due_at too close to now", task.id)
-        return
-    except Exception:  # noqa: BLE001 - accepting the task must never fail because this did
-        logger.exception("Could not auto-sync accepted task %s to a Reminder", task.id)
-        return
-    task.reminder_id = reminder.id
-
-
 @router.get("/tasks", response_model=list[TaskOut])
 async def list_tasks(
     workspace_id: str | None = Query(default=None),
+    scope: Literal["personal", "all"] = Query(default="personal"),
     limit: int = Query(default=200, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> list[TaskOut]:
-    workspace = await resolve_workspace_for_user(db, current_user.id, workspace_id)
-    # Same reasoning as create_task below and src/api/routes.py's /chat handler: a task the
-    # proactive detector suggests to a participant of a personal-workspace direct/group
-    # conversation gets workspace_id = conversation.workspace_id, anchored to whichever
-    # participant's personal workspace created the conversation first - which is legitimately a
-    # *different* personal workspace than this owner's own. Requiring an exact match here silently
-    # hid every such task from its own owner's Task list. Only enforce the match for an
-    # organization workspace, where it's a real multi-tenant boundary; a personal workspace's
-    # boundary is ownership itself (Task.owner_id), not which conversation happened to spawn it.
-    filters = [Task.owner_id == current_user.id]
-    if workspace.type == "organization":
-        filters.append(Task.workspace_id == workspace.id)
-    tasks = (
+    if scope == "all" and workspace_id is not None:
+        raise HTTPException(status_code=422, detail="workspace_id cannot be combined with scope=all")
+
+    statement = (
+        select(Task, Workspace, AgentWorkspace, Conversation)
+        .join(Workspace, Workspace.id == Task.workspace_id)
+        .outerjoin(
+            AgentWorkspace,
+            and_(
+                AgentWorkspace.id == Task.agent_workspace_id,
+                AgentWorkspace.organization_workspace_id == Workspace.id,
+            ),
+        )
+        .outerjoin(Conversation, Conversation.id == Task.conversation_id)
+    )
+    if scope == "all":
+        statement = (
+            statement
+            .outerjoin(
+                WorkspaceMembership,
+                and_(
+                    WorkspaceMembership.workspace_id == Workspace.id,
+                    WorkspaceMembership.user_id == current_user.id,
+                    WorkspaceMembership.status == "active",
+                ),
+            )
+            .outerjoin(
+                AgentWorkspaceMembership,
+                and_(
+                    AgentWorkspaceMembership.agent_workspace_id == Task.agent_workspace_id,
+                    AgentWorkspaceMembership.user_id == current_user.id,
+                    AgentWorkspaceMembership.status == "active",
+                ),
+            )
+            .outerjoin(
+                ConversationParticipant,
+                and_(
+                    ConversationParticipant.conversation_id == Task.conversation_id,
+                    ConversationParticipant.user_id == current_user.id,
+                    ConversationParticipant.principal_kind == "workspace_user",
+                    ConversationParticipant.revoked_at.is_(None),
+                ),
+            )
+            .where(
+                Task.owner_id == current_user.id,
+                Workspace.status == "active",
+                or_(
+                    and_(
+                        Workspace.type == "personal",
+                        Workspace.personal_owner_user_id == current_user.id,
+                    ),
+                    and_(
+                        Workspace.type == "organization",
+                        WorkspaceMembership.id.is_not(None),
+                        or_(
+                            Task.agent_workspace_id.is_(None),
+                            and_(
+                                AgentWorkspace.status == "active",
+                                AgentWorkspaceMembership.id.is_not(None),
+                            ),
+                        ),
+                        or_(
+                            Task.conversation_id.is_(None),
+                            ConversationParticipant.id.is_not(None),
+                        ),
+                    ),
+                ),
+            )
+        )
+    else:
+        workspace = await resolve_workspace_for_user(db, current_user.id, workspace_id)
+        statement = statement.where(
+            Task.owner_id == current_user.id,
+            Task.workspace_id == workspace.id,
+            Task.agent_workspace_id.is_(None),
+        )
+
+    rows = (
         await db.execute(
-            select(Task)
-            .where(*filters)
+            statement
             .order_by(
                 Task.due_at.is_(None),
                 Task.due_at.asc(),
@@ -252,9 +257,11 @@ async def list_tasks(
             .offset(offset)
             .limit(limit)
         )
-    ).scalars().all()
-    source_messages_by_task = await _load_source_messages(db, tasks)
-    return [_to_out(t, source_messages=source_messages_by_task.get(t.id)) for t in tasks]
+    ).all()
+    return [
+        _to_out(task, workspace=workspace, agent_workspace=agent_workspace, conversation=conversation)
+        for task, workspace, agent_workspace, conversation in rows
+    ]
 
 
 @router.post("/tasks", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
@@ -267,24 +274,13 @@ async def create_task(
     if request.conversation_id is not None:
         await require_conversation_access(db, current_user, request.conversation_id, "viewer")
         conversation = await db.get(Conversation, request.conversation_id)
-        if conversation is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
-        # Same reasoning as src/api/routes.py's /chat handler: a personal-workspace direct/group
-        # conversation is anchored to whichever participant's personal workspace created it first
-        # (see chat_service.get_or_create_direct_conversation) - the OTHER participant's own
-        # resolved `workspace` here is legitimately a different personal workspace. Only reject
-        # the mismatch when it would actually matter, i.e. an organization workspace.
-        if conversation.workspace_id != workspace.id and workspace.type == "organization":
+        if conversation is None or conversation.workspace_id != workspace.id:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="conversation_id does not belong to the selected workspace",
             )
     if request.source == "ai_extracted":
-        if (
-            request.conversation_id is None
-            or not request.source_message_ids
-            or not request.consent_scope_hash
-        ):
+        if request.conversation_id is None or not request.source_message_ids or not request.consent_scope_hash:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="AI-extracted candidates require conversation provenance and a consent snapshot",
@@ -303,31 +299,20 @@ async def create_task(
                 detail="Candidate provenance includes a message that AI is not allowed to process",
             )
 
-        # Same workspace_id caveat as list_tasks above - this idempotency lookup must find the
-        # candidate by ownership, not by matching the caller's own resolved workspace, or a
-        # personal-workspace participant retrying this call would never see their own earlier
-        # candidate and would create a duplicate every time instead of returning the existing one.
-        # source_message_ids is deliberately left out of the SQL filter and checked in Python
-        # below instead: it's a plain `JSON` column, and Postgres's json type (unlike jsonb) has no
-        # `=` operator at all, so `Task.source_message_ids == request.source_message_ids` raised
-        # "operator does not exist: json = json" on every single ai_extracted create against the
-        # real Postgres backend - the dedup-narrowing scalar filters below are more than specific
-        # enough that this remaining Python-side check only ever compares a handful of rows.
-        dedup_filters = [
-            Task.owner_id == current_user.id,
-            Task.conversation_id == request.conversation_id,
-            Task.source == "ai_extracted",
-            Task.status == "suggested",
-            Task.title == request.title,
-            Task.consent_scope_hash == request.consent_scope_hash,
-        ]
-        if workspace.type == "organization":
-            dedup_filters.append(Task.workspace_id == workspace.id)
-        candidates = (await db.execute(select(Task).where(*dedup_filters))).scalars().all()
-        existing = next(
-            (candidate for candidate in candidates if candidate.source_message_ids == request.source_message_ids),
-            None,
-        )
+        existing = (
+            await db.execute(
+                select(Task).where(
+                    Task.owner_id == current_user.id,
+                    Task.workspace_id == workspace.id,
+                    Task.conversation_id == request.conversation_id,
+                    Task.source == "ai_extracted",
+                    Task.status == "suggested",
+                    Task.title == request.title,
+                    Task.consent_scope_hash == request.consent_scope_hash,
+                    Task.source_message_ids == request.source_message_ids,
+                )
+            )
+        ).scalar_one_or_none()
         if existing is not None:
             return _to_out(existing)
     due_at = request.due_at
@@ -343,6 +328,11 @@ async def create_task(
         workspace_id=workspace.id,
         owner_id=current_user.id,
         conversation_id=request.conversation_id,
+        # This general endpoint is owned by Personal Agent/manual personal
+        # task flows.  A source conversation is provenance, not authority to
+        # promote the task into a shared Agent Workspace. Workspace work items
+        # are created only by the specialist Delivery/Quality boundaries.
+        agent_workspace_id=None,
         title=request.title,
         due_at=due_at,
         priority=request.priority,
@@ -350,12 +340,67 @@ async def create_task(
         source=request.source,
         source_message_ids=request.source_message_ids if request.source == "ai_extracted" else None,
         consent_scope_hash=request.consent_scope_hash if request.source == "ai_extracted" else None,
+        requires_review=request.requires_review,
     )
     db.add(task)
     await db.commit()
     await db.refresh(task)
+    await reminder_service.reconcile_task_reminder(task.id)
     out = _to_out(task, due_at_override=due_at)
     await manager.broadcast_to_users([current_user.id], {"type": "task_created", "task": out.model_dump(mode="json")})
+    return out
+
+
+@router.patch("/tasks/{task_id}", response_model=TaskOut)
+async def update_task(
+    task_id: str,
+    request: UpdateTaskRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TaskOut:
+    """Update owner-controlled deadline and private reminder settings."""
+
+    task = await _get_own_task_or_404(task_id, current_user, db)
+    if task.row_version != request.expected_row_version:
+        raise HTTPException(status_code=409, detail="Task changed; reload before updating")
+
+    changed_fields = request.model_fields_set
+    if "due_at" in changed_fields:
+        if task.agent_workspace_id is not None:
+            raise HTTPException(
+                status_code=403,
+                detail="Workspace task deadlines are managed through the Workspace Agent workflow",
+            )
+        due_at = request.due_at
+        if due_at is not None and due_at.tzinfo is None:
+            due_at = due_at.replace(
+                tzinfo=ZoneInfo(current_user.timezone or get_settings().calendar_timezone)
+            )
+        task.due_at = due_at
+    if "auto_reminder_enabled" in changed_fields:
+        task.auto_reminder_enabled = bool(request.auto_reminder_enabled)
+
+    task.row_version += 1
+    await record_audit_event(
+        db,
+        actor=current_user,
+        action="task.settings_updated",
+        target_type="task",
+        target_id=task.id,
+        workspace_id=task.workspace_id,
+        metadata={
+            "deadline_updated": "due_at" in changed_fields,
+            "auto_reminder_enabled": task.auto_reminder_enabled,
+            "agent_workspace_id": task.agent_workspace_id,
+        },
+    )
+    await db.commit()
+    await db.refresh(task)
+    await reminder_service.reconcile_task_reminder(task.id)
+    out = _to_out(task)
+    await manager.broadcast_to_users(
+        [current_user.id], {"type": "task_updated", "task": out.model_dump(mode="json")}
+    )
     return out
 
 
@@ -367,30 +412,116 @@ async def update_task_status(
     db: AsyncSession = Depends(get_db),
 ) -> TaskOut:
     task = await _get_own_task_or_404(task_id, current_user, db)
+    previous_status = task.status
     if task.status == "invalidated":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This AI candidate is no longer valid because its source consent changed",
         )
-    # "Accept" is specifically suggested -> pending (see TaskPage.jsx/TaskInboxPage.jsx accept()) -
-    # that's the explicit human confirmation that should trigger the Calendar auto-sync below.
-    is_accept = task.status == "suggested" and request.status == "pending"
+    if request.expected_row_version is not None and task.row_version != request.expected_row_version:
+        raise HTTPException(status_code=409, detail="Task changed; reload before updating")
+    if request.status in {"submitted", "changes_requested"}:
+        raise HTTPException(status_code=422, detail="Use the submission and Lead review workflows")
+    if request.status != task.status and request.status not in _OWNER_TRANSITIONS.get(task.status, set()):
+        raise HTTPException(status_code=409, detail="Task transition is not allowed")
     if task.status == "suggested" and request.status in {"pending", "in_progress", "completed"}:
         await _require_current_ai_provenance(task, db)
-    if request.due_at is not None:
-        due_at = request.due_at
-        if due_at.tzinfo is None:
-            due_at = due_at.replace(tzinfo=ZoneInfo(get_settings().calendar_timezone))
-        task.due_at = due_at
+    if request.status == "blocked" and request.blocked_reason is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A blocked task requires a blocked_reason",
+        )
+    if task.requires_review and request.status == "completed" and task.status != "completed":
+        raise HTTPException(status_code=409, detail="This task requires evidence submission and Lead review")
+    now = datetime.now(UTC)
     task.status = request.status
-    if is_accept:
-        await _sync_task_to_calendar(task, current_user)
-        await _sync_task_to_reminder(task, current_user, db)
+    if request.status in {"in_progress", "blocked", "completed"} and task.started_at is None:
+        task.started_at = now
+    task.completed_at = now if request.status == "completed" else None
+    task.blocked_reason = request.blocked_reason if request.status == "blocked" else None
+    if request.status == "in_progress" and previous_status == "changes_requested":
+        task.reviewed_by_user_id = None
+        task.reviewed_at = None
+    task.row_version += 1
+    await record_audit_event(
+        db,
+        actor=current_user,
+        action="task.status_updated",
+        target_type="task",
+        target_id=task.id,
+        workspace_id=task.workspace_id,
+        metadata={"status": request.status, "agent_workspace_id": task.agent_workspace_id},
+    )
     await db.commit()
     await db.refresh(task)
+    await reminder_service.reconcile_task_reminder(task.id)
     out = _to_out(task)
     await manager.broadcast_to_users([current_user.id], {"type": "task_updated", "task": out.model_dump(mode="json")})
 
+    return out
+
+
+@router.post("/tasks/{task_id}/submission", response_model=TaskOut)
+async def submit_task_for_review(
+    task_id: str,
+    request: TaskSubmissionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TaskOut:
+    """Submit evidence without allowing the owner or an LLM to self-approve quality."""
+
+    task = await _get_own_task_or_404(task_id, current_user, db)
+    if not task.requires_review:
+        raise HTTPException(status_code=409, detail="This task does not require Lead review")
+    if task.row_version != request.expected_row_version:
+        raise HTTPException(status_code=409, detail="Task changed; reload before submitting")
+    if task.status not in {"pending", "in_progress", "changes_requested"}:
+        raise HTTPException(status_code=409, detail="Task is not ready for submission")
+    now = datetime.now(UTC)
+    task.status = "submitted"
+    task.submission_note = request.submission_note
+    task.evidence_urls = list(request.evidence_urls)
+    task.submitted_by_user_id = current_user.id
+    task.submitted_at = now
+    task.reviewed_by_user_id = None
+    task.reviewed_at = None
+    task.review_note = None
+    task.blocked_reason = None
+    task.started_at = task.started_at or now
+    task.completed_at = None
+    task.row_version += 1
+    await record_audit_event(
+        db,
+        actor=current_user,
+        action="task.submitted",
+        target_type="task",
+        target_id=task.id,
+        workspace_id=task.workspace_id,
+        metadata={
+            "agent_workspace_id": task.agent_workspace_id,
+            "evidence_count": len(task.evidence_urls),
+            "has_submission_note": bool(task.submission_note),
+        },
+    )
+    await db.commit()
+    await db.refresh(task)
+    await reminder_service.reconcile_task_reminder(task.id)
+    out = _to_out(task)
+    recipients = {current_user.id}
+    if task.agent_workspace_id:
+        lead_id = await db.scalar(
+            select(AgentWorkspaceMembership.user_id).where(
+                AgentWorkspaceMembership.agent_workspace_id == task.agent_workspace_id,
+                AgentWorkspaceMembership.business_role == "lead",
+                AgentWorkspaceMembership.status == "active",
+            )
+        )
+        if lead_id:
+            recipients.add(lead_id)
+    await manager.broadcast_to_users(
+        list(recipients),
+        {"type": "task_submitted", "task": out.model_dump(mode="json")},
+    )
     return out
 
 
@@ -399,6 +530,21 @@ async def delete_task(
     task_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ) -> None:
     task = await _get_own_task_or_404(task_id, current_user, db)
+    if task.requires_review and (task.submitted_at is not None or task.reviewed_at is not None):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A governed task cannot be deleted after it has entered review",
+        )
+    await record_audit_event(
+        db,
+        actor=current_user,
+        action="task.deleted",
+        target_type="task",
+        target_id=task.id,
+        workspace_id=task.workspace_id,
+        metadata={"status": task.status, "agent_workspace_id": task.agent_workspace_id},
+    )
+    await reminder_service.remove_task_reminder(task.id)
     await db.delete(task)
     await db.commit()
     await manager.broadcast_to_users([current_user.id], {"type": "task_deleted", "task_id": task_id})

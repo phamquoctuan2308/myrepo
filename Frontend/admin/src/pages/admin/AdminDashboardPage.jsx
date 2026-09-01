@@ -38,7 +38,7 @@ export default function AdminDashboardPage() {
     { label: 'Conversations', value: stats?.total_conversations?.toLocaleString() ?? '—', icon: 'bi-chat-square-dots', tone: 'green', note: 'Platform total' },
     { label: 'Messages', value: stats?.total_messages?.toLocaleString() ?? '—', icon: 'bi-envelope', tone: 'violet', note: 'Platform total' },
     { label: 'AI requests today', value: stats?.requests_today?.toLocaleString() ?? '—', icon: 'bi-stars', tone: 'orange', note: 'Live usage' },
-    { label: 'Tokens today', value: stats?.tokens_used_today?.toLocaleString() ?? '—', icon: 'bi-lightning-charge', tone: 'pink', note: `${stats?.budget_used_pct ?? 0}% of budget`, trend: nearBudget ? 'down' : 'up' },
+    { label: 'Tokens today', value: stats?.tokens_used_today?.toLocaleString() ?? '—', icon: 'bi-lightning-charge', tone: 'pink', note: `Highest account: ${stats?.budget_used_pct ?? 0}%`, trend: nearBudget ? 'down' : 'up' },
   ]
   const totalTokens = usage?.totals?.total_tokens || 0
   let cursor = 0
@@ -53,7 +53,7 @@ export default function AdminDashboardPage() {
   return <div className="admin-page">
     <AdminPageHeader title="Platform overview" description="Live accounts, messaging, AI activity, and infrastructure health." />
     {error && <div className="admin-warning-banner"><i className="bi bi-exclamation-triangle" /><div><strong>Dashboard data is incomplete</strong><span>{error}</span></div></div>}
-    {nearBudget && <div className="admin-warning-banner"><i className="bi bi-exclamation-triangle" /><div><strong>Daily AI budget is nearly exhausted</strong><span>{stats.tokens_used_today.toLocaleString()} of {stats.daily_token_budget.toLocaleString()} tokens used.</span></div></div>}
+    {nearBudget && <div className="admin-warning-banner"><i className="bi bi-exclamation-triangle" /><div><strong>An account is nearing its daily AI allowance</strong><span>Highest account usage is {stats.budget_used_pct}% of the {stats.daily_token_budget.toLocaleString()} token per-account limit.</span></div></div>}
     {loading && <div className="admin-empty"><span className="spinner-border spinner-border-sm" /><strong>Loading platform data…</strong></div>}
     {!loading && <>
       <section className="admin-metrics-grid">{cards.map(item => <MetricCard key={item.label} item={item} />)}</section>

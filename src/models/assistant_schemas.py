@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AssistantThreadOut(BaseModel):
@@ -14,3 +14,5 @@ class AssistantThreadOut(BaseModel):
 class AssistantMessageOut(BaseModel):
     role: Literal["user", "assistant"]
     content: str
+    analysis: str = ""
+    analysis_steps: list[str] = Field(default_factory=list)

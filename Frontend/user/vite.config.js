@@ -1,9 +1,30 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
+import { fileURLToPath } from 'node:url'
 
-// Tailwind is scoped to this app only (Frontend/admin has its own separate vite.config.js and
-// does not get this plugin) - see Frontend/user/src/orbit-tailwind.css for why preflight is
-// skipped (Bootstrap 5 is still the base design system; Tailwind only adds utility classes for
-// the new sci-fi surfaces).
-export default defineConfig({ plugins: [react(), tailwindcss()], server: { port: 5173 } })
+import react from '@vitejs/plugin-react'
+import { defineConfig, loadEnv } from 'vite'
+
+const projectRoot = fileURLToPath(new URL('.', import.meta.url))
+
+function requireBuildUrl(env, name, protocols) {
+  const value = env[name]?.trim()
+  if (!value) throw new Error(`${name} must be set for a production build`)
+  const url = new URL(value)
+  const isLocal = ['localhost', '127.0.0.1'].includes(url.hostname)
+  if (!protocols.includes(url.protocol) && !isLocal) {
+    throw new Error(`${name} must use ${protocols.join(' or ')} outside localhost`)
+  }
+}
+
+export default defineConfig(({ command, mode }) => {
+  if (command === 'build') {
+    const env = loadEnv(mode, projectRoot, '')
+    requireBuildUrl(env, 'VITE_API_BASE_URL', ['https:'])
+    requireBuildUrl(env, 'VITE_WS_BASE_URL', ['wss:'])
+    requireBuildUrl(env, 'VITE_ADMIN_APP_URL', ['https:'])
+  }
+  return {
+    plugins: [react()],
+    devtools: false,
+    server: { port: 5173 },
+  }
+})

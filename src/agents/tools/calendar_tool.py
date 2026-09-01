@@ -5,7 +5,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import interrupt
 
 from src.agents.state import AgentState
-from src.services import calendar_service, guardrail_service
+from src.services import calendar_service, guardrail_service, reminder_service
 from src.services.google_credentials import CalendarNotConnectedError
 
 
@@ -27,8 +27,7 @@ async def create_calendar_event(
     state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
 ) -> str:
     """Draft a Google Calendar event. Requires the user's explicit confirmation before it is
-    actually created. Never use this tool to schedule, coordinate, facilitate, or conceal
-    illegal/unsafe conduct; those requests are rejected.
+    actually created.
 
     Args:
         summary: Event title.
@@ -41,7 +40,6 @@ async def create_calendar_event(
     if not policy.allowed:
         return policy.response
     user_id, _workspace_id = _agent_identity(state)
-
     try:
         conflicts = await calendar_service.find_conflicts(user_id, start_iso, end_iso)
     except CalendarNotConnectedError:
@@ -53,6 +51,8 @@ async def create_calendar_event(
         "end": end_iso,
         "description": description,
         "attendees": attendees or [],
+        "create_reminder": True,
+        "reminder_lead_minutes": 30,
     }
     if conflicts:
         # Propose & Verify: surface what it clashes with plus up to 2 free alternatives in the
@@ -71,7 +71,6 @@ async def create_calendar_event(
     )
     if not policy.allowed:
         return policy.response
-
     try:
         created = await calendar_service.create_event(
             user_id,
@@ -86,7 +85,19 @@ async def create_calendar_event(
     await calendar_service.broadcast_change(
         user_id, "calendar_event_created", {"event": calendar_service.to_out_dict(created)}
     )
-    return f"Event created: {created.get('htmlLink', created.get('id'))}"
+    reminder = None
+    if draft.get("create_reminder", True):
+        reminder = await reminder_service.reconcile_calendar_event_reminder(
+            owner_id=user_id,
+            calendar_event_id=str(created.get("id") or ""),
+            title=str(created.get("summary") or draft["summary"]),
+            start_at=(created.get("start") or {}).get("dateTime") or draft["start"],
+            create_if_missing=True,
+            lead_minutes=int(draft.get("reminder_lead_minutes", 30)),
+            source="agent",
+        )
+    suffix = " Orbit reminder linked." if reminder is not None else ""
+    return f"Event created: {created.get('htmlLink', created.get('id'))}.{suffix}".rstrip(".") + "."
 
 
 @tool
@@ -119,10 +130,9 @@ async def list_calendar_events(
     if not items:
         return "No events found in that range."
     return "\n".join(
-        f"- {guardrail_service.sanitize_untrusted_text(e.get('summary') or '')} "
-        f"(id={guardrail_service.sanitize_untrusted_text(e.get('id') or '')}, "
-        f"{e['start'].get('dateTime', e['start'].get('date'))})"
-        for e in items
+        "- " + guardrail_service.sanitize_untrusted_text(str(e.get("summary") or ""))
+        + f" (id={guardrail_service.sanitize_untrusted_text(str(e.get('id') or ''))}, "
+        + f"{e['start'].get('dateTime', e['start'].get('date'))})" for e in items
     )
 
 
@@ -136,8 +146,7 @@ async def update_calendar_event(
     state: Annotated[AgentState, InjectedState] = None,  # type: ignore[assignment]
 ) -> str:
     """Draft changes to an existing Google Calendar event (found via list_calendar_events).
-    Requires the user's explicit confirmation before they take effect. Never use this tool to
-    schedule, coordinate, facilitate, or conceal illegal/unsafe conduct. Only pass the fields
+    Requires the user's explicit confirmation before they take effect. Only pass the fields
     that should change; the rest stay as-is.
 
     Args:
@@ -151,7 +160,6 @@ async def update_calendar_event(
     policy = guardrail_service.evaluate_action_content(f"{summary or ''}\n{description or ''}")
     if not policy.allowed:
         return policy.response
-
     decision = interrupt({"type": "calendar_event_update", "draft": draft})
     if not decision or not decision.get("approved"):
         return "Calendar event was not updated (user declined)."
@@ -162,7 +170,6 @@ async def update_calendar_event(
     )
     if not policy.allowed:
         return policy.response
-
     user_id, workspace_id = _agent_identity(state)
     try:
         updated = await calendar_service.update_event(
@@ -177,6 +184,13 @@ async def update_calendar_event(
         return "Connect Google Calendar from the Calendar page before updating an event."
     await calendar_service.broadcast_change(
         user_id, "calendar_event_updated", {"event": calendar_service.to_out_dict(updated)}
+    )
+    updated_out = calendar_service.to_out_dict(updated)
+    await reminder_service.reconcile_calendar_event_reminder(
+        owner_id=user_id,
+        calendar_event_id=draft["event_id"],
+        title=updated_out.get("title"),
+        start_at=updated_out.get("start"),
     )
     return f"Event updated: {updated.get('htmlLink', updated.get('id'))}"
 
@@ -202,4 +216,5 @@ async def delete_calendar_event(
     except CalendarNotConnectedError:
         return "Connect Google Calendar from the Calendar page before deleting an event."
     await calendar_service.broadcast_change(user_id, "calendar_event_deleted", {"event_id": event_id})
+    await reminder_service.remove_calendar_event_reminder(user_id, event_id)
     return "Event deleted."

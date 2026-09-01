@@ -74,7 +74,51 @@ def test_state_hidden_from_llm_tool_schema():
 @pytest.mark.asyncio
 async def test_search_messages_no_conversation_id_in_state():
     result = await search_tool.search_messages.coroutine(query="deadline", max_results=20, state={})
-    assert "No active conversation history" in result
+    assert "No authenticated conversation history" in result
+
+
+@pytest.mark.asyncio
+async def test_personal_agent_searches_all_authorized_conversations(
+    client, auth_headers, other_auth_headers
+):
+    alice_id = await _get_user_id("alice@example.com")
+    bob_id = await _get_user_id("bob@example.com")
+    now = datetime.now(UTC)
+    first = await _seed_conversation(
+        alice_id, bob_id, [(bob_id, "OAuth deadline is Friday", now - timedelta(minutes=2))]
+    )
+    second = await _seed_conversation(
+        alice_id, bob_id, [(bob_id, "OAuth deadline moved to Monday", now - timedelta(minutes=1))]
+    )
+
+    result = await search_tool.search_messages.coroutine(
+        query="OAuth deadline", max_results=20, state={"user_id": alice_id}
+    )
+
+    assert "OAuth deadline is Friday" in result
+    assert "OAuth deadline moved to Monday" in result
+    assert first in result and second in result
+
+
+@pytest.mark.asyncio
+async def test_global_search_excludes_direct_conversation_without_caller_ai_grant(
+    client, auth_headers, other_auth_headers
+):
+    alice_id = await _get_user_id("alice@example.com")
+    bob_id = await _get_user_id("bob@example.com")
+    conv_id = await _seed_conversation(
+        alice_id, bob_id, [(bob_id, "hidden global deadline", datetime.now(UTC))]
+    )
+    async with db_session.async_session_maker() as db:
+        permission = await db.get(AIPermission, (conv_id, alice_id))
+        permission.granted = False
+        await db.commit()
+
+    result = await search_tool.search_messages.coroutine(
+        query="hidden global deadline", max_results=20, state={"user_id": alice_id}
+    )
+
+    assert result == "No authorized messages matched 'hidden global deadline'."
 
 
 @pytest.mark.asyncio
