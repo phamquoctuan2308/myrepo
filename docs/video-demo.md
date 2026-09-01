@@ -1,5 +1,5 @@
 # Video Demo — Orbit
 
-Điền liên kết video demo của dự án vào mục dưới đây:
+Xem video demo của dự án tại liên kết dưới đây:
 
-- Video demo: `<DÁN_LINK_VIDEO_DEMO_TẠI_ĐÂY>`
+- Video demo: [Google Drive](https://drive.google.com/file/d/1ou32hwANshIsunuOtKMHRoRbZvFi_cq3/view?usp=sharing)
