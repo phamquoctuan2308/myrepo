@@ -1,0 +1,44 @@
+{
+  "run_at": "2026-08-29T13:15:42.921Z",
+  "mode": "Lighthouse lab, unauthenticated login pages, system Chrome",
+  "gates": {
+    "performance_min": 80,
+    "accessibility_min": 90,
+    "lcp_max_ms": 2500,
+    "cls_max": 0.1
+  },
+  "user": {
+    "url": "https://c3-app-132-auo2.vercel.app/login",
+    "performance": 61,
+    "accessibility": 92,
+    "best_practices": 96,
+    "seo": 82,
+    "fcp_ms": 6505.108,
+    "lcp_ms": 6505.108,
+    "tbt_ms": 0,
+    "cls": 0.002921,
+    "performance_status": "FAIL",
+    "accessibility_status": "PASS",
+    "lcp_status": "FAIL",
+    "cls_status": "PASS"
+  },
+  "admin": {
+    "url": "https://admin-nu-six-83.vercel.app/login",
+    "performance": 82,
+    "accessibility": 83,
+    "best_practices": 96,
+    "seo": 82,
+    "fcp_ms": 3642.232,
+    "lcp_ms": 3642.232,
+    "tbt_ms": 0,
+    "cls": 0,
+    "performance_status": "PASS",
+    "accessibility_status": "FAIL",
+    "lcp_status": "FAIL",
+    "cls_status": "PASS"
+  },
+  "inp": {
+    "status": "NOT_MEASURED",
+    "reason": "INP requires real-user or controlled interaction data; a navigation-only Lighthouse lab run does not supply it."
+  }
+}

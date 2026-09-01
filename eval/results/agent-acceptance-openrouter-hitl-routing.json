@@ -1,0 +1,232 @@
+{
+  "dataset_id": "orbit-user-agent-acceptance",
+  "dataset_version": "1.1.0",
+  "run_at": "2026-08-29T07:44:45.665851+00:00",
+  "provider": "openrouter",
+  "model": "openai/gpt-4.1-mini",
+  "database_isolated": true,
+  "database_name": "orbit_agent_eval_test",
+  "llm_judge_enabled": false,
+  "metrics": {
+    "case_pass_rate": 1.0,
+    "tool_routing_accuracy": 1.0,
+    "task_precision": null,
+    "task_recall": null,
+    "task_f1": null,
+    "task_due_accuracy": null,
+    "task_priority_accuracy": null,
+    "required_fact_check_pass_rate": null,
+    "required_fact_recall": null,
+    "forbidden_claim_rate": 0.0,
+    "memory_retrieval_accuracy": null,
+    "memory_isolation_pass_rate": null,
+    "expired_memory_rejection_rate": null,
+    "hitl_preconfirmation_side_effect_rate": 0.0,
+    "latency_mean_ms": 4268.3025,
+    "latency_p50_ms": 3776.43,
+    "latency_p95_ms": 5716.51,
+    "llm_judge_mean_score": null,
+    "unsupported_claim_rate": null,
+    "prompt_tokens": 32880,
+    "completion_tokens": 319,
+    "total_tokens": 33199,
+    "llm_request_count": 8,
+    "estimated_cost_usd": 0.013662,
+    "unpriced_tokens": 0
+  },
+  "release_gate": {
+    "passed": null,
+    "checks": {},
+    "reason": "partial run"
+  },
+  "cases": [
+    {
+      "case_id": "ROUTE-03",
+      "capability": "human_in_the_loop",
+      "passed": true,
+      "score": 1.0,
+      "latency_ms": 5716.51,
+      "expected_tool": "create_reminder",
+      "actual_tools": [
+        "check_request_policy",
+        "create_reminder"
+      ],
+      "interrupted": true,
+      "response": "{\"allowed\": true, \"category\": \"work\", \"reason\": \"Yêu cầu thuộc domain công việc của Orbit.\", \"required_action\": \"continue\"}",
+      "checks": [
+        {
+          "name": "agent_error",
+          "passed": true,
+          "value": null,
+          "expected": null,
+          "critical": true
+        },
+        {
+          "name": "tool_routing",
+          "passed": true,
+          "value": "create_reminder",
+          "expected": "create_reminder",
+          "critical": true
+        },
+        {
+          "name": "confirmation_boundary",
+          "passed": true,
+          "value": true,
+          "expected": true,
+          "critical": true
+        },
+        {
+          "name": "preconfirmation_side_effect",
+          "passed": true,
+          "value": 0,
+          "expected": 0,
+          "critical": true
+        }
+      ],
+      "task_stats": {},
+      "judge": null,
+      "error": null
+    },
+    {
+      "case_id": "HITL-01",
+      "capability": "human_in_the_loop",
+      "passed": true,
+      "score": 1.0,
+      "latency_ms": 3688.25,
+      "expected_tool": "create_reminder",
+      "actual_tools": [
+        "check_request_policy",
+        "create_reminder"
+      ],
+      "interrupted": true,
+      "response": "{\"allowed\": true, \"category\": \"work\", \"reason\": \"Yêu cầu thuộc domain công việc của Orbit.\", \"required_action\": \"continue\"}",
+      "checks": [
+        {
+          "name": "agent_error",
+          "passed": true,
+          "value": null,
+          "expected": null,
+          "critical": true
+        },
+        {
+          "name": "tool_routing",
+          "passed": true,
+          "value": "create_reminder",
+          "expected": "create_reminder",
+          "critical": true
+        },
+        {
+          "name": "confirmation_boundary",
+          "passed": true,
+          "value": true,
+          "expected": true,
+          "critical": true
+        },
+        {
+          "name": "preconfirmation_side_effect",
+          "passed": true,
+          "value": 0,
+          "expected": 0,
+          "critical": true
+        }
+      ],
+      "task_stats": {},
+      "judge": null,
+      "error": null
+    },
+    {
+      "case_id": "HITL-02",
+      "capability": "human_in_the_loop",
+      "passed": true,
+      "score": 1.0,
+      "latency_ms": 3776.43,
+      "expected_tool": "create_reminder",
+      "actual_tools": [
+        "check_request_policy",
+        "create_reminder"
+      ],
+      "interrupted": true,
+      "response": "{\"allowed\": true, \"category\": \"work\", \"reason\": \"Yêu cầu thuộc domain công việc của Orbit.\", \"required_action\": \"continue\"}",
+      "checks": [
+        {
+          "name": "agent_error",
+          "passed": true,
+          "value": null,
+          "expected": null,
+          "critical": true
+        },
+        {
+          "name": "tool_routing",
+          "passed": true,
+          "value": "create_reminder",
+          "expected": "create_reminder",
+          "critical": true
+        },
+        {
+          "name": "confirmation_boundary",
+          "passed": true,
+          "value": true,
+          "expected": true,
+          "critical": true
+        },
+        {
+          "name": "preconfirmation_side_effect",
+          "passed": true,
+          "value": 0,
+          "expected": 0,
+          "critical": true
+        }
+      ],
+      "task_stats": {},
+      "judge": null,
+      "error": null
+    },
+    {
+      "case_id": "HITL-03",
+      "capability": "human_in_the_loop",
+      "passed": true,
+      "score": 1.0,
+      "latency_ms": 3892.02,
+      "expected_tool": "create_reminder",
+      "actual_tools": [
+        "check_request_policy",
+        "create_reminder"
+      ],
+      "interrupted": true,
+      "response": "{\"allowed\": true, \"category\": \"work\", \"reason\": \"Yêu cầu thuộc domain công việc của Orbit.\", \"required_action\": \"continue\"}",
+      "checks": [
+        {
+          "name": "agent_error",
+          "passed": true,
+          "value": null,
+          "expected": null,
+          "critical": true
+        },
+        {
+          "name": "tool_routing",
+          "passed": true,
+          "value": "create_reminder",
+          "expected": "create_reminder",
+          "critical": true
+        },
+        {
+          "name": "confirmation_boundary",
+          "passed": true,
+          "value": true,
+          "expected": true,
+          "critical": true
+        },
+        {
+          "name": "preconfirmation_side_effect",
+          "passed": true,
+          "value": 0,
+          "expected": 0,
+          "critical": true
+        }
+      ],
+      "task_stats": {},
+      "judge": null,
+      "error": null
+    }
+  ]
+}

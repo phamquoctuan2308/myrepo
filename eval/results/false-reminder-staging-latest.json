@@ -1,0 +1,271 @@
+{
+  "run_at": "2026-08-29T07:15:27.324797+00:00",
+  "environment": "staging",
+  "target": "https://orbit-backend-xkgq.onrender.com/api/v1",
+  "database": "deployment PostgreSQL",
+  "dataset_id": "orbit-non-commitment-messages",
+  "dataset_version": "1.0.0",
+  "case_count": 40,
+  "sent_count": 40,
+  "send_errors": [],
+  "category_counts": {
+    "completed_past": 8,
+    "delegated_to_other": 8,
+    "discussion": 8,
+    "greeting": 8,
+    "question": 8
+  },
+  "false_positive_count": 0,
+  "false_positive_rate": 0.0,
+  "false_positive_case_ids": [],
+  "proactive_tasks_created": 0,
+  "usage_calls_observed": 40,
+  "usage_prompt_tokens": 16370,
+  "usage_completion_tokens": 734,
+  "usage_total_tokens": 17104,
+  "usage_estimated_cost_usd": 0.0028959,
+  "synthetic_tasks_deleted": 0,
+  "synthetic_conversation_cleanup_requested": true,
+  "cases": [
+    {
+      "case_id": "GREETING-01",
+      "category": "greeting",
+      "message_id": "2cbf41df40b34ec7b500ced1b5f65342",
+      "send_latency_ms": 119.895
+    },
+    {
+      "case_id": "GREETING-02",
+      "category": "greeting",
+      "message_id": "e1d4a3f7cbec414097cbe36e39fafe8a",
+      "send_latency_ms": 139.792
+    },
+    {
+      "case_id": "GREETING-03",
+      "category": "greeting",
+      "message_id": "040b792b89ed45b0811cebc4f18caa0c",
+      "send_latency_ms": 122.043
+    },
+    {
+      "case_id": "GREETING-04",
+      "category": "greeting",
+      "message_id": "24543118c818408cbd16c5a585e8bc2e",
+      "send_latency_ms": 123.67
+    },
+    {
+      "case_id": "GREETING-05",
+      "category": "greeting",
+      "message_id": "e3d9923a63b64b0d8a81ea1e1965d644",
+      "send_latency_ms": 147.858
+    },
+    {
+      "case_id": "GREETING-06",
+      "category": "greeting",
+      "message_id": "54eeba16c9084fb396c88e0c60c8d53a",
+      "send_latency_ms": 123.692
+    },
+    {
+      "case_id": "GREETING-07",
+      "category": "greeting",
+      "message_id": "12efc98089be4a9d8f706253d2d1ebf7",
+      "send_latency_ms": 127.919
+    },
+    {
+      "case_id": "GREETING-08",
+      "category": "greeting",
+      "message_id": "9bd138e3b9114281ac0dd5cd7b906c7b",
+      "send_latency_ms": 149.364
+    },
+    {
+      "case_id": "DISCUSS-01",
+      "category": "discussion",
+      "message_id": "af4cb6bc419f46a5987e889e51483706",
+      "send_latency_ms": 123.648
+    },
+    {
+      "case_id": "DISCUSS-02",
+      "category": "discussion",
+      "message_id": "e8d60e228b5e4e5099ff5c30bd06c5de",
+      "send_latency_ms": 117.659
+    },
+    {
+      "case_id": "DISCUSS-03",
+      "category": "discussion",
+      "message_id": "faa186c1d20248db891cf02ba93b8882",
+      "send_latency_ms": 119.16
+    },
+    {
+      "case_id": "DISCUSS-04",
+      "category": "discussion",
+      "message_id": "bac671ddb4b94702a793de21771ce6c9",
+      "send_latency_ms": 123.663
+    },
+    {
+      "case_id": "DISCUSS-05",
+      "category": "discussion",
+      "message_id": "cb242e4a98104f25bd37705f38e9edde",
+      "send_latency_ms": 150.458
+    },
+    {
+      "case_id": "DISCUSS-06",
+      "category": "discussion",
+      "message_id": "5add5b21b0454cb5ad88b84417c7c3d9",
+      "send_latency_ms": 116.21
+    },
+    {
+      "case_id": "DISCUSS-07",
+      "category": "discussion",
+      "message_id": "89469677a4314633856952f8baf84692",
+      "send_latency_ms": 117.857
+    },
+    {
+      "case_id": "DISCUSS-08",
+      "category": "discussion",
+      "message_id": "c6cde5f1ff2947d6adb02b596b6b43b5",
+      "send_latency_ms": 116.46
+    },
+    {
+      "case_id": "QUESTION-01",
+      "category": "question",
+      "message_id": "e6e8f484d6aa4e46b9e6e5e541bd4f7b",
+      "send_latency_ms": 116.938
+    },
+    {
+      "case_id": "QUESTION-02",
+      "category": "question",
+      "message_id": "7bd2d681c0884ff4b2a251dffba56363",
+      "send_latency_ms": 113.535
+    },
+    {
+      "case_id": "QUESTION-03",
+      "category": "question",
+      "message_id": "f81eda283d8141d3827b955efb93efcf",
+      "send_latency_ms": 129.249
+    },
+    {
+      "case_id": "QUESTION-04",
+      "category": "question",
+      "message_id": "94da55f8e3d846e6a87af498e897ad3f",
+      "send_latency_ms": 123.637
+    },
+    {
+      "case_id": "QUESTION-05",
+      "category": "question",
+      "message_id": "aa346f5ed5ad448faf50e29e0224d357",
+      "send_latency_ms": 122.469
+    },
+    {
+      "case_id": "QUESTION-06",
+      "category": "question",
+      "message_id": "66b38baef2f34d27a62b8e9e751c4d09",
+      "send_latency_ms": 146.324
+    },
+    {
+      "case_id": "QUESTION-07",
+      "category": "question",
+      "message_id": "c175ee712b274b53a4cc5b4e38597b6a",
+      "send_latency_ms": 164.775
+    },
+    {
+      "case_id": "QUESTION-08",
+      "category": "question",
+      "message_id": "fc52e5408c8042c595564ceb0f13e7db",
+      "send_latency_ms": 142.191
+    },
+    {
+      "case_id": "DELEGATE-01",
+      "category": "delegated_to_other",
+      "message_id": "ae83c6b15c9e41a2a379fff18ca584a5",
+      "send_latency_ms": 136.495
+    },
+    {
+      "case_id": "DELEGATE-02",
+      "category": "delegated_to_other",
+      "message_id": "f690860fa09b433e9b2df7d256387418",
+      "send_latency_ms": 840.612
+    },
+    {
+      "case_id": "DELEGATE-03",
+      "category": "delegated_to_other",
+      "message_id": "acff28fd831b4a37b0e470bbf5055cfa",
+      "send_latency_ms": 112.332
+    },
+    {
+      "case_id": "DELEGATE-04",
+      "category": "delegated_to_other",
+      "message_id": "a77318fd755e4994b53ef802df446ff7",
+      "send_latency_ms": 124.345
+    },
+    {
+      "case_id": "DELEGATE-05",
+      "category": "delegated_to_other",
+      "message_id": "29e6f29b933849d6bbd18ba7098bc11e",
+      "send_latency_ms": 141.901
+    },
+    {
+      "case_id": "DELEGATE-06",
+      "category": "delegated_to_other",
+      "message_id": "36292bd7d3084a4caaa8e92880b4016a",
+      "send_latency_ms": 126.163
+    },
+    {
+      "case_id": "DELEGATE-07",
+      "category": "delegated_to_other",
+      "message_id": "ee4d3d6d696c4e0297bd00ecec7f9c6b",
+      "send_latency_ms": 139.099
+    },
+    {
+      "case_id": "DELEGATE-08",
+      "category": "delegated_to_other",
+      "message_id": "ab958bf2b2a6418daa423b4de370e9e9",
+      "send_latency_ms": 154.139
+    },
+    {
+      "case_id": "PAST-01",
+      "category": "completed_past",
+      "message_id": "f61b9db4ae2b4af686261f7f06cdc1cd",
+      "send_latency_ms": 140.193
+    },
+    {
+      "case_id": "PAST-02",
+      "category": "completed_past",
+      "message_id": "696d2e0663f4423486c19aacc69d7764",
+      "send_latency_ms": 117.89
+    },
+    {
+      "case_id": "PAST-03",
+      "category": "completed_past",
+      "message_id": "6174153a07d14549abb6e4013071703e",
+      "send_latency_ms": 121.265
+    },
+    {
+      "case_id": "PAST-04",
+      "category": "completed_past",
+      "message_id": "c4705262855346bda18e7606bf76b0ed",
+      "send_latency_ms": 128.518
+    },
+    {
+      "case_id": "PAST-05",
+      "category": "completed_past",
+      "message_id": "1f9c460827cc4ab1b6bb9f7c59e4b724",
+      "send_latency_ms": 118.863
+    },
+    {
+      "case_id": "PAST-06",
+      "category": "completed_past",
+      "message_id": "21889ad127b7461cb552f8dd97448341",
+      "send_latency_ms": 120.875
+    },
+    {
+      "case_id": "PAST-07",
+      "category": "completed_past",
+      "message_id": "5014ceb287cd4d0db6f9b300557d14ff",
+      "send_latency_ms": 122.829
+    },
+    {
+      "case_id": "PAST-08",
+      "category": "completed_past",
+      "message_id": "aa4c5d022caa464c9c6a142d07e34059",
+      "send_latency_ms": 138.249
+    }
+  ]
+}

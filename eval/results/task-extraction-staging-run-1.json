@@ -1,0 +1,977 @@
+{
+  "run": 1,
+  "case_count": 60,
+  "title_precision": 0.8679245283018868,
+  "title_recall": 0.9387755102040817,
+  "title_f1": 0.9019607843137256,
+  "date_correct": 40,
+  "date_checked": 42,
+  "date_accuracy": 0.9523809523809523,
+  "llm_errors": [],
+  "cases": [
+    {
+      "name": "single_task_explicit_weekday",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 7137.461,
+      "predicted": [
+        {
+          "title": "Gửi báo cáo doanh thu cho sếp",
+          "due_at": "2026-09-04T14:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "single_task_relative_date",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 7511.671,
+      "predicted": [
+        {
+          "title": "Xem xét PR",
+          "due_at": "2026-08-30T09:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "multiple_tasks_one_message",
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 3,
+      "date_checked": 3,
+      "latency_ms": 2304.698,
+      "predicted": [
+        {
+          "title": "Gửi dự thảo ngân sách Q3",
+          "due_at": "2026-09-04T14:00:00+07:00",
+          "priority": "High"
+        },
+        {
+          "title": "Đặt địa điểm cho buổi offsite",
+          "due_at": "2026-09-04T14:00:00+07:00",
+          "priority": "High"
+        },
+        {
+          "title": "Xác nhận số lượng phục vụ ăn uống",
+          "due_at": "2026-09-04T14:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "appointment_not_just_task",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1144.451,
+      "predicted": [
+        {
+          "title": "Hẹn khám răng",
+          "due_at": "2026-08-30T15:00:00+07:00",
+          "priority": "Medium"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "task_buried_in_small_talk",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1064.349,
+      "predicted": [
+        {
+          "title": "Nộp đề cương dự án",
+          "due_at": "2026-08-30T14:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "no_task_casual_chat",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 894.626,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "no_task_past_tense_recap",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 707.268,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "question_is_not_a_task",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 1009.231,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "late_night_today_deadline",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 993.301,
+      "predicted": [
+        {
+          "title": "Gửi bản báo cáo",
+          "due_at": "2026-08-29T23:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "early_tomorrow_morning",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 990.806,
+      "predicted": [
+        {
+          "title": "Gọi cho khách",
+          "due_at": "2026-08-30T07:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "sarcastic_complaint_not_a_task",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 919.603,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "rhetorical_question_not_a_task",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 876.245,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "third_party_fyi_not_actionable",
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 1172.352,
+      "predicted": [
+        {
+          "title": "Nộp bản demo cho khách",
+          "due_at": "2026-09-04T14:01:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "explicit_past_completion_reply",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 1292.324,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "date_phrase_eod_friday",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 969.193,
+      "predicted": [
+        {
+          "title": "Gửi hóa đơn cuối cùng cho khách hàng",
+          "due_at": "2026-09-04T17:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "date_phrase_end_of_month",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 1053.234,
+      "predicted": [
+        {
+          "title": "Chốt số liệu doanh thu cuối tháng",
+          "due_at": "2026-08-31T00:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "date_phrase_early_next_week",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 969.794,
+      "predicted": [
+        {
+          "title": "Gửi lại bản hợp đồng đã sửa",
+          "due_at": "2026-08-31T14:01:00+07:00",
+          "priority": "Medium"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "request_phrased_as_question",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 958.092,
+      "predicted": [
+        {
+          "title": "Gửi lại bản thiết kế",
+          "due_at": "2026-09-04T14:01:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "four_tasks_one_message",
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 4,
+      "date_checked": 4,
+      "latency_ms": 2431.322,
+      "predicted": [
+        {
+          "title": "Chốt ngân sách quý",
+          "due_at": "2026-09-04T14:01:00+07:00",
+          "priority": "High"
+        },
+        {
+          "title": "Gửi báo giá cho khách A",
+          "due_at": "2026-09-04T14:01:00+07:00",
+          "priority": "High"
+        },
+        {
+          "title": "Đặt lịch họp với đối tác",
+          "due_at": "2026-09-04T14:01:00+07:00",
+          "priority": "High"
+        },
+        {
+          "title": "In tài liệu cho buổi demo",
+          "due_at": "2026-09-04T14:01:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "same_task_confirmed_by_two_people",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1097.205,
+      "predicted": [
+        {
+          "title": "Nộp báo cáo tháng trước",
+          "due_at": "2026-08-31T00:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "personal_reminder_not_work",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 1,
+      "latency_ms": 924.723,
+      "predicted": [
+        {
+          "title": "Mua quà sinh nhật cho mẹ",
+          "due_at": "2026-09-05T00:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "date_phrase_in_two_days",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 995.405,
+      "predicted": [
+        {
+          "title": "Nộp bản nháp thiết kế",
+          "due_at": "2026-08-31T14:01:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "pure_small_talk_longer",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 662.493,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "past_missed_deadline_complaint",
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 932.551,
+      "predicted": [
+        {
+          "title": "Nộp báo cáo",
+          "due_at": "2026-08-28T00:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "task_cancelled_different_phrasing",
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 921.104,
+      "predicted": [
+        {
+          "title": "Đặt vé máy bay cho chuyến công tác",
+          "due_at": "2026-08-30T14:01:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "two_tasks_two_different_dates",
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1424.515,
+      "predicted": [
+        {
+          "title": "Nộp báo cáo tuần",
+          "due_at": "2026-09-04T14:01:00+07:00",
+          "priority": "High"
+        },
+        {
+          "title": "Nộp báo cáo tháng",
+          "due_at": "2026-09-07T14:01:00+07:00",
+          "priority": "Medium"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "apology_without_new_commitment",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 646.721,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "urgent_same_day_no_time",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 945.686,
+      "predicted": [
+        {
+          "title": "Nộp hồ sơ thầu",
+          "due_at": "2026-08-29T23:59:59+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "three_way_chat_clear_owner",
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1289.644,
+      "predicted": [
+        {
+          "title": "Đặt phòng họp cho buổi demo",
+          "due_at": "2026-08-31T14:01:00+07:00",
+          "priority": "High"
+        },
+        {
+          "title": "Chuẩn bị slide cho buổi demo",
+          "due_at": null,
+          "priority": "Medium"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "code_switch_vi_en",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1061.931,
+      "predicted": [
+        {
+          "title": "nộp report cho sếp",
+          "due_at": "2026-08-30T14:01:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "task_explicitly_cancelled",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 693.815,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "date_phrase_next_week",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1161.785,
+      "predicted": [
+        {
+          "title": "Nộp bản nháp hợp đồng",
+          "due_at": "2026-09-05T14:01:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "task_buried_in_long_chat",
+      "tp": 1,
+      "fp": 2,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1571.586,
+      "predicted": [
+        {
+          "title": "Gửi file báo giá cho khách",
+          "due_at": "2026-08-30T17:00:00+07:00",
+          "priority": "High"
+        },
+        {
+          "title": "Đi cà phê cuối tuần",
+          "due_at": null,
+          "priority": "Medium"
+        },
+        {
+          "title": "Xem phim cuối tuần",
+          "due_at": null,
+          "priority": "Low"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "conflicting_dates_final_wins",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 1,
+      "latency_ms": 1446.921,
+      "predicted": [
+        {
+          "title": "nộp bản thảo",
+          "due_at": "2026-09-07T14:01:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "task_for_third_party",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 903.133,
+      "predicted": [
+        {
+          "title": "Nhắc Bob nộp báo cáo tuần",
+          "due_at": "2026-08-30T14:01:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "task_with_no_date",
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 698.188,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "multiple_unrelated_tasks_with_noise",
+      "tp": 2,
+      "fp": 0,
+      "fn": 1,
+      "date_correct": 2,
+      "date_checked": 2,
+      "latency_ms": 1288.042,
+      "predicted": [
+        {
+          "title": "Gửi file hợp đồng cho khách",
+          "due_at": "2026-08-30T14:01:00+07:00",
+          "priority": "Medium"
+        },
+        {
+          "title": "Chuẩn bị slide báo cáo quý cho sếp",
+          "due_at": "2026-09-04T14:01:00+07:00",
+          "priority": "Medium"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "negative_greeting_and_weekend_chat",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 688.244,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "negative_information_question_english",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 672.69,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "negative_completed_release_recap",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 710.414,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "negative_explicit_do_not_action",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 745.199,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "negative_third_party_assignment",
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 1137.616,
+      "predicted": [
+        {
+          "title": "Theo dõi cập nhật hợp đồng từ đội đối tác",
+          "due_at": "2026-09-04T14:02:00+07:00",
+          "priority": "Medium"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "negative_hypothetical_task",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 775.989,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "negative_quoted_instruction",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 985.88,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "negative_rhetorical_deadline_english",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 773.105,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "negative_long_multi_party_status_only",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 1022.757,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "negative_cancelled_after_long_discussion",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 760.104,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "negative_availability_statement",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 147.254,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "negative_past_due_without_recommitment",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 751.021,
+      "predicted": [],
+      "error": null
+    },
+    {
+      "name": "positive_english_explicit_deadline",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1028.235,
+      "predicted": [
+        {
+          "title": "Gửi báo cáo sự cố",
+          "due_at": "2026-08-30T16:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "positive_english_two_actions",
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 2,
+      "date_checked": 2,
+      "latency_ms": 1434.403,
+      "predicted": [
+        {
+          "title": "Xem xét PR 912",
+          "due_at": "2026-08-29T14:02:00+07:00",
+          "priority": "High"
+        },
+        {
+          "title": "Đăng tải ghi chú phát hành",
+          "due_at": "2026-09-04T14:02:00+07:00",
+          "priority": "Medium"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "positive_multi_party_two_owners",
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 2,
+      "date_checked": 2,
+      "latency_ms": 1329.582,
+      "predicted": [
+        {
+          "title": "Chốt checklist release",
+          "due_at": "2026-09-03T14:02:00+07:00",
+          "priority": "High"
+        },
+        {
+          "title": "Gửi biên bản QA",
+          "due_at": "2026-08-30T14:02:00+07:00",
+          "priority": "Medium"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "positive_long_chat_task_at_end",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 987.487,
+      "predicted": [
+        {
+          "title": "Gửi số liệu chi phí",
+          "due_at": "2026-08-30T10:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "positive_corrected_deadline_english",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1019.222,
+      "predicted": [
+        {
+          "title": "Giao đề xuất",
+          "due_at": "2026-09-03T15:00:00+07:00",
+          "priority": "Medium"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "positive_next_monday_vietnamese",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1128.201,
+      "predicted": [
+        {
+          "title": "Hoàn tất tài liệu onboarding",
+          "due_at": "2026-08-31T00:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "positive_code_switch_with_time",
+      "tp": 0,
+      "fp": 1,
+      "fn": 1,
+      "date_correct": 0,
+      "date_checked": 0,
+      "latency_ms": 1050.391,
+      "predicted": [
+        {
+          "title": "Cập nhật danh sách kiểm tra triển khai",
+          "due_at": "2026-08-30T14:00:00+07:00",
+          "priority": "Medium"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "positive_question_as_request_english",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 977.2,
+      "predicted": [
+        {
+          "title": "Gửi hóa đơn cho khách hàng",
+          "due_at": "2026-08-30T12:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "positive_three_tasks_multi_party",
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 3,
+      "date_checked": 3,
+      "latency_ms": 1569.898,
+      "predicted": [
+        {
+          "title": "Chốt ngân sách",
+          "due_at": "2026-09-04T14:02:00+07:00",
+          "priority": "High"
+        },
+        {
+          "title": "Đặt phòng demo",
+          "due_at": "2026-09-04T14:02:00+07:00",
+          "priority": "Medium"
+        },
+        {
+          "title": "Gửi danh sách khách",
+          "due_at": "2026-09-04T14:02:00+07:00",
+          "priority": "Low"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "positive_same_day_urgent_english",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1027.947,
+      "predicted": [
+        {
+          "title": "Tải lên hợp đồng đã ký",
+          "due_at": "2026-08-29T18:00:00+07:00",
+          "priority": "High"
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "positive_task_after_completed_item",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "date_correct": 1,
+      "date_checked": 1,
+      "latency_ms": 1022.84,
+      "predicted": [
+        {
+          "title": "Gửi phụ lục cho khách",
+          "due_at": "2026-08-30T08:00:00+07:00",
+          "priority": "Medium"
+        }
+      ],
+      "error": null
+    }
+  ]
+}

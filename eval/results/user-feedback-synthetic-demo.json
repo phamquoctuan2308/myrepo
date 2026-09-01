@@ -1,0 +1,18 @@
+{
+  "status": "INSUFFICIENT_DATA",
+  "participant_count": 5,
+  "response_count": 5,
+  "minimum_participants": 999,
+  "task_completion_rate": 0.8,
+  "rating_mean": 3.6,
+  "helpfulness_mean": 4.0,
+  "trust_mean": 3.6,
+  "would_use_again_rate": 0.8,
+  "issue_categories": {
+    "clarity": 1,
+    "none": 3,
+    "oauth_setup": 1
+  },
+  "consented_anonymized_quotes": [],
+  "generated_at": "2026-08-29T08:07:13.681340+00:00"
+}

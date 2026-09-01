@@ -1,0 +1,221 @@
+{
+  "run_at": "2026-08-29T08:26:25.023Z",
+  "browser": "system Chrome via Playwright",
+  "user_revision": "6c8b489f51e6",
+  "admin_revision": "8195003923c1",
+  "user_login": {
+    "passed": true,
+    "redirect_url": "https://c3-app-132-auo2.vercel.app/chat"
+  },
+  "browser_chat": {
+    "passed": true,
+    "message_count_before": 0,
+    "message_count_after": 2
+  },
+  "user_routes": [
+    {
+      "label": "user/assistant",
+      "url": "https://c3-app-132-auo2.vercel.app/assistant",
+      "title": "Orbit — AI Work Assistant",
+      "body_text_length": 2904,
+      "violations": 4,
+      "serious_or_critical": 2,
+      "violation_ids": [
+        "button-name:critical:3",
+        "color-contrast:serious:7",
+        "heading-order:moderate:1",
+        "landmark-unique:moderate:1"
+      ],
+      "http_status": 200
+    },
+    {
+      "label": "user/chat",
+      "url": "https://c3-app-132-auo2.vercel.app/chat",
+      "title": "Orbit — AI Work Assistant",
+      "body_text_length": 1387,
+      "violations": 6,
+      "serious_or_critical": 4,
+      "violation_ids": [
+        "button-name:critical:4",
+        "color-contrast:serious:14",
+        "landmark-unique:moderate:1",
+        "nested-interactive:serious:2",
+        "page-has-heading-one:moderate:1",
+        "select-name:critical:1"
+      ],
+      "http_status": 200
+    },
+    {
+      "label": "user/tasks",
+      "url": "https://c3-app-132-auo2.vercel.app/tasks",
+      "title": "Orbit — AI Work Assistant",
+      "body_text_length": 776,
+      "violations": 4,
+      "serious_or_critical": 2,
+      "violation_ids": [
+        "color-contrast:serious:2",
+        "empty-table-header:minor:2",
+        "heading-order:moderate:1",
+        "label:critical:1"
+      ],
+      "http_status": 200
+    },
+    {
+      "label": "user/tasks/inbox",
+      "url": "https://c3-app-132-auo2.vercel.app/tasks/inbox",
+      "title": "Orbit — AI Work Assistant",
+      "body_text_length": 454,
+      "violations": 1,
+      "serious_or_critical": 1,
+      "violation_ids": [
+        "color-contrast:serious:1"
+      ],
+      "http_status": 200
+    },
+    {
+      "label": "user/reminders",
+      "url": "https://c3-app-132-auo2.vercel.app/reminders",
+      "title": "Orbit — AI Work Assistant",
+      "body_text_length": 1123,
+      "violations": 3,
+      "serious_or_critical": 1,
+      "violation_ids": [
+        "color-contrast:serious:22",
+        "heading-order:moderate:1",
+        "landmark-unique:moderate:1"
+      ],
+      "http_status": 200
+    },
+    {
+      "label": "user/calendar",
+      "url": "https://c3-app-132-auo2.vercel.app/calendar",
+      "title": "Orbit — AI Work Assistant",
+      "body_text_length": 452,
+      "violations": 2,
+      "serious_or_critical": 1,
+      "violation_ids": [
+        "color-contrast:serious:2",
+        "heading-order:moderate:1"
+      ],
+      "http_status": 200
+    },
+    {
+      "label": "user/memory",
+      "url": "https://c3-app-132-auo2.vercel.app/memory",
+      "title": "Orbit — AI Work Assistant",
+      "body_text_length": 520,
+      "violations": 1,
+      "serious_or_critical": 1,
+      "violation_ids": [
+        "color-contrast:serious:2"
+      ],
+      "http_status": 200
+    },
+    {
+      "label": "user/profile",
+      "url": "https://c3-app-132-auo2.vercel.app/profile",
+      "title": "Orbit — AI Work Assistant",
+      "body_text_length": 1399,
+      "violations": 3,
+      "serious_or_critical": 2,
+      "violation_ids": [
+        "color-contrast:serious:4",
+        "label:critical:4",
+        "landmark-unique:moderate:2"
+      ],
+      "http_status": 200
+    }
+  ],
+  "admin_login": {
+    "passed": true,
+    "redirect_url": "https://admin-nu-six-83.vercel.app/admin"
+  },
+  "admin_routes": [
+    {
+      "label": "admin/admin",
+      "url": "https://admin-nu-six-83.vercel.app/admin",
+      "http_status": 200,
+      "title": "Orbit Admin",
+      "body_text_length": 1475,
+      "violations": 1,
+      "serious_or_critical": 1,
+      "violation_ids": [
+        "color-contrast:serious:14"
+      ]
+    },
+    {
+      "label": "admin/admin/users",
+      "url": "https://admin-nu-six-83.vercel.app/admin/users",
+      "http_status": 200,
+      "title": "Orbit Admin",
+      "body_text_length": 3665,
+      "violations": 2,
+      "serious_or_critical": 2,
+      "violation_ids": [
+        "color-contrast:serious:33",
+        "select-name:critical:1"
+      ]
+    },
+    {
+      "label": "admin/admin/user-data",
+      "url": "https://admin-nu-six-83.vercel.app/admin/user-data",
+      "http_status": 200,
+      "title": "Orbit Admin",
+      "body_text_length": 2207,
+      "violations": 2,
+      "serious_or_critical": 2,
+      "violation_ids": [
+        "color-contrast:serious:5",
+        "select-name:critical:1"
+      ]
+    },
+    {
+      "label": "admin/admin/ai",
+      "url": "https://admin-nu-six-83.vercel.app/admin/ai",
+      "http_status": 200,
+      "title": "Orbit Admin",
+      "body_text_length": 1131,
+      "violations": 2,
+      "serious_or_critical": 2,
+      "violation_ids": [
+        "color-contrast:serious:5",
+        "label:critical:1"
+      ]
+    },
+    {
+      "label": "admin/admin/ai-usage",
+      "url": "https://admin-nu-six-83.vercel.app/admin/ai-usage",
+      "http_status": 200,
+      "title": "Orbit Admin",
+      "body_text_length": 939,
+      "violations": 2,
+      "serious_or_critical": 2,
+      "violation_ids": [
+        "color-contrast:serious:8",
+        "select-name:critical:1"
+      ]
+    },
+    {
+      "label": "admin/admin/audit-log",
+      "url": "https://admin-nu-six-83.vercel.app/admin/audit-log",
+      "http_status": 200,
+      "title": "Orbit Admin",
+      "body_text_length": 2690,
+      "violations": 2,
+      "serious_or_critical": 2,
+      "violation_ids": [
+        "color-contrast:serious:4",
+        "select-name:critical:1"
+      ]
+    }
+  ],
+  "diagnostics": {
+    "console_errors": [
+      "Failed to load resource: the server responded with a status of 409 ()"
+    ],
+    "page_errors": [],
+    "failed_requests": [],
+    "admin_console_errors": [],
+    "admin_page_errors": []
+  }
+}

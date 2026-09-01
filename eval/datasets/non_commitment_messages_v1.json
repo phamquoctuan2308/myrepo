@@ -1,0 +1,51 @@
+{
+  "dataset_id": "orbit-non-commitment-messages",
+  "version": "1.0.0",
+  "description": "Synthetic messages that must not create a proactive task candidate.",
+  "cases": [
+    {"id": "GREETING-01", "category": "greeting", "content": "Chào buổi sáng mọi người!"},
+    {"id": "GREETING-02", "category": "greeting", "content": "Hello team, chúc mọi người một ngày tốt lành."},
+    {"id": "GREETING-03", "category": "greeting", "content": "Cảm ơn bạn nhiều nhé."},
+    {"id": "GREETING-04", "category": "greeting", "content": "Không có gì đâu, chuyện nhỏ mà."},
+    {"id": "GREETING-05", "category": "greeting", "content": "Haha đoạn này vui thật."},
+    {"id": "GREETING-06", "category": "greeting", "content": "Mọi người ăn trưa ngon miệng nhé."},
+    {"id": "GREETING-07", "category": "greeting", "content": "Tạm biệt cả nhóm, hẹn gặp lại."},
+    {"id": "GREETING-08", "category": "greeting", "content": "Chúc mừng sinh nhật Minh!"},
+
+    {"id": "DISCUSS-01", "category": "discussion", "content": "Theo mình phương án A dễ hiểu hơn phương án B."},
+    {"id": "DISCUSS-02", "category": "discussion", "content": "Màu xanh nhìn ổn nhưng phần chữ hơi nhỏ."},
+    {"id": "DISCUSS-03", "category": "discussion", "content": "Khách hàng có vẻ thích bản demo hôm qua."},
+    {"id": "DISCUSS-04", "category": "discussion", "content": "Sprint này khá nhiều bug nên tiến độ hơi chậm."},
+    {"id": "DISCUSS-05", "category": "discussion", "content": "Tài liệu hiện tại mô tả API khá rõ."},
+    {"id": "DISCUSS-06", "category": "discussion", "content": "Có lẽ nguyên nhân là cache cũ trên trình duyệt."},
+    {"id": "DISCUSS-07", "category": "discussion", "content": "Ý tưởng này thú vị nhưng chi phí vận hành có thể cao."},
+    {"id": "DISCUSS-08", "category": "discussion", "content": "The latest build looks more stable than the previous one."},
+
+    {"id": "QUESTION-01", "category": "question", "content": "Cuộc họp thường bắt đầu lúc mấy giờ?"},
+    {"id": "QUESTION-02", "category": "question", "content": "Ai đang phụ trách module thanh toán vậy?"},
+    {"id": "QUESTION-03", "category": "question", "content": "Bản thiết kế này đã được duyệt chưa?"},
+    {"id": "QUESTION-04", "category": "question", "content": "Mọi người thấy phương án nào tốt hơn?"},
+    {"id": "QUESTION-05", "category": "question", "content": "Where can I find the API documentation?"},
+    {"id": "QUESTION-06", "category": "question", "content": "Deadline cũ của ticket này là ngày nào?"},
+    {"id": "QUESTION-07", "category": "question", "content": "Có ai gặp lỗi đăng nhập giống mình không?"},
+    {"id": "QUESTION-08", "category": "question", "content": "Tại sao build hôm qua lại chậm hơn bình thường?"},
+
+    {"id": "DELEGATE-01", "category": "delegated_to_other", "content": "Bình gửi báo cáo cho khách hàng trước thứ Sáu nhé."},
+    {"id": "DELEGATE-02", "category": "delegated_to_other", "content": "Lan kiểm tra lại số liệu giúp anh nhé."},
+    {"id": "DELEGATE-03", "category": "delegated_to_other", "content": "Minh sẽ phụ trách phần frontend của ticket này."},
+    {"id": "DELEGATE-04", "category": "delegated_to_other", "content": "Nhờ team QA chạy regression vào chiều mai."},
+    {"id": "DELEGATE-05", "category": "delegated_to_other", "content": "Huy cần cập nhật tài liệu trước khi release."},
+    {"id": "DELEGATE-06", "category": "delegated_to_other", "content": "Please ask Alice to review the pull request."},
+    {"id": "DELEGATE-07", "category": "delegated_to_other", "content": "Bên vận hành sẽ kiểm tra log máy chủ."},
+    {"id": "DELEGATE-08", "category": "delegated_to_other", "content": "Khách hàng cần gửi lại file dữ liệu cho chúng ta."},
+
+    {"id": "PAST-01", "category": "completed_past", "content": "Mình đã gửi báo cáo và sếp duyệt xong rồi."},
+    {"id": "PAST-02", "category": "completed_past", "content": "Hôm qua team đã deploy phiên bản mới thành công."},
+    {"id": "PAST-03", "category": "completed_past", "content": "Bug đăng nhập đã được sửa từ sáng nay."},
+    {"id": "PAST-04", "category": "completed_past", "content": "I finished the review and merged the pull request."},
+    {"id": "PAST-05", "category": "completed_past", "content": "Cuộc họp với khách hàng vừa kết thúc."},
+    {"id": "PAST-06", "category": "completed_past", "content": "Mình đã đặt phòng họp rồi, không cần làm thêm gì nữa."},
+    {"id": "PAST-07", "category": "completed_past", "content": "Ticket OPS-123 đã đóng vào tuần trước."},
+    {"id": "PAST-08", "category": "completed_past", "content": "Bản sao lưu đã chạy xong lúc 2 giờ sáng."}
+  ]
+}

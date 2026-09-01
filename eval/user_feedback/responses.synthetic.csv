@@ -1,0 +1,6 @@
+response_id,participant_id,tested_at,role,scenario,task_completed,rating_1_5,helpfulness_1_5,trust_1_5,would_use_again,issue_category,comment,consent_to_use_anonymized_quote
+synthetic-r1,synthetic-p1,2026-08-29,employee,conversation_summary,true,4,4,4,true,none,[SYNTHETIC] Summary flow completed in a demo scenario,false
+synthetic-r2,synthetic-p2,2026-08-29,project_manager,task_extraction,true,4,5,4,true,none,[SYNTHETIC] Extracted tasks were useful in a demo scenario,false
+synthetic-r3,synthetic-p3,2026-08-29,employee,calendar_reminder,true,3,4,3,true,oauth_setup,[SYNTHETIC] Calendar setup required extra configuration,false
+synthetic-r4,synthetic-p4,2026-08-29,team_lead,memory,true,4,4,4,true,none,[SYNTHETIC] Memory retrieval worked in a demo scenario,false
+synthetic-r5,synthetic-p5,2026-08-29,administrator,privacy_controls,false,3,3,3,false,clarity,[SYNTHETIC] Permission wording needs more clarity,false

@@ -1,0 +1,49 @@
+{
+  "run_at": "2026-08-29T13:13:22.336Z",
+  "target": {
+    "api": "https://orbit-backend-xkgq.onrender.com/api/v1",
+    "ws": "wss://orbit-backend-xkgq.onrender.com/api/v1/ws"
+  },
+  "accounts": 2,
+  "ws_connections": 0,
+  "websocket": {
+    "handshake_error": "Unexpected server response: 403",
+    "messages_sent": 0,
+    "expected_deliveries": 0,
+    "deliveries": 0,
+    "latency": null
+  },
+  "task": {
+    "create_status": 201,
+    "list_status": 200,
+    "visible_after_create": true,
+    "update_status": 200,
+    "delete_status": 204
+  },
+  "reminder": {
+    "create_status": 201,
+    "final_status": "fired",
+    "event_received": false,
+    "delivery_from_create_ms": null,
+    "delete_status": 204
+  },
+  "calendar_internal": {
+    "connection_status": 200,
+    "connected": false,
+    "events_status": 409
+  },
+  "load": {
+    "requests": 100,
+    "concurrency": 5,
+    "success_2xx": 85,
+    "status_counts": {
+      "200": 85,
+      "429": 15
+    },
+    "latency": {
+      "p50_ms": 277.867,
+      "p95_ms": 766.802,
+      "max_ms": 2706.449
+    }
+  }
+}

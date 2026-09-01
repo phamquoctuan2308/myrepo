@@ -1,0 +1,20 @@
+{
+  "run_at": "2026-08-29T13:20:25.6325896Z",
+  "target": "https://orbit-backend-xkgq.onrender.com/api/v1",
+  "scope": "Google Calendar only; Google Sign-In excluded by user request",
+  "authorization_url_status": 200,
+  "authorization_host": "accounts.google.com",
+  "authorization_url_has_client_id": true,
+  "client_id_matches_local_calendar_setting": true,
+  "client_id_is_distinct_from_google_signin_setting": false,
+  "calendar_scope_present": true,
+  "redirect_uri": "https://orbit-backend-xkgq.onrender.com/api/v1/calendar/oauth/callback",
+  "callback_error_status": 400,
+  "callback_frontend_origin": "https://c3-app-132-auo2.vercel.app",
+  "callback_frontend_origin_matches_staging": true,
+  "connection_status_endpoint": 200,
+  "currently_connected": false,
+  "interactive_google_consent": "NOT_RUN",
+  "status": "PARTIAL",
+  "reason": "Runtime OAuth configuration is valid enough to create a Google Calendar authorization URL, but no user completed Google's interactive consent flow."
+}

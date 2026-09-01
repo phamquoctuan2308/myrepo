@@ -1,0 +1,556 @@
+{
+  "run_at": "2026-08-29T14:29:54.166692+00:00",
+  "local_model": {
+    "provider": "openrouter",
+    "model": "openai/gpt-4.1-mini"
+  },
+  "daily_token_budget": {
+    "actual_tokens_per_day": 200000,
+    "env_default_tokens_per_day": 200000,
+    "system_config_override": null,
+    "source": "environment",
+    "database": {
+      "host": "127.0.0.1",
+      "port": 55432,
+      "name": "orbit_agent_eval_test"
+    }
+  },
+  "false_reminder": {
+    "dataset_id": "orbit-non-commitment-messages",
+    "dataset_version": "1.0.0",
+    "case_count": 40,
+    "relevance_positive_count": 5,
+    "extraction_count": 5,
+    "false_positive_count": 1,
+    "false_positive_rate": 0.025,
+    "false_positive_case_ids": [
+      "DELEGATE-01"
+    ],
+    "error_count": 0,
+    "cases": [
+      {
+        "id": "GREETING-01",
+        "category": "greeting",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 1395.139,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "GREETING-02",
+        "category": "greeting",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 1429.895,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "GREETING-03",
+        "category": "greeting",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 859.529,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "GREETING-04",
+        "category": "greeting",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 830.298,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "GREETING-05",
+        "category": "greeting",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 870.491,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "GREETING-06",
+        "category": "greeting",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 902.25,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "GREETING-07",
+        "category": "greeting",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 777.213,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "GREETING-08",
+        "category": "greeting",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 802.663,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DISCUSS-01",
+        "category": "discussion",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 812.678,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DISCUSS-02",
+        "category": "discussion",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 1031.49,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DISCUSS-03",
+        "category": "discussion",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 923.038,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DISCUSS-04",
+        "category": "discussion",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 855.394,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DISCUSS-05",
+        "category": "discussion",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 827.435,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DISCUSS-06",
+        "category": "discussion",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 933.358,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DISCUSS-07",
+        "category": "discussion",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 845.975,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DISCUSS-08",
+        "category": "discussion",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 780.4,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "QUESTION-01",
+        "category": "question",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 973.954,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "QUESTION-02",
+        "category": "question",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 866.209,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "QUESTION-03",
+        "category": "question",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 826.142,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "QUESTION-04",
+        "category": "question",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 868.546,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "QUESTION-05",
+        "category": "question",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 933.871,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "QUESTION-06",
+        "category": "question",
+        "relevant": true,
+        "candidate_count": 0,
+        "relevance_latency_ms": 983.257,
+        "extraction_latency_ms": 1296.777,
+        "error": null
+      },
+      {
+        "id": "QUESTION-07",
+        "category": "question",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 1061.62,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "QUESTION-08",
+        "category": "question",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 1301.348,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DELEGATE-01",
+        "category": "delegated_to_other",
+        "relevant": true,
+        "candidate_count": 1,
+        "relevance_latency_ms": 902.309,
+        "extraction_latency_ms": 1289.041,
+        "error": null
+      },
+      {
+        "id": "DELEGATE-02",
+        "category": "delegated_to_other",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 796.417,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DELEGATE-03",
+        "category": "delegated_to_other",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 969.938,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DELEGATE-04",
+        "category": "delegated_to_other",
+        "relevant": true,
+        "candidate_count": 0,
+        "relevance_latency_ms": 852.248,
+        "extraction_latency_ms": 1127.368,
+        "error": null
+      },
+      {
+        "id": "DELEGATE-05",
+        "category": "delegated_to_other",
+        "relevant": true,
+        "candidate_count": 0,
+        "relevance_latency_ms": 783.085,
+        "extraction_latency_ms": 1160.002,
+        "error": null
+      },
+      {
+        "id": "DELEGATE-06",
+        "category": "delegated_to_other",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 931.314,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DELEGATE-07",
+        "category": "delegated_to_other",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 1506.673,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "DELEGATE-08",
+        "category": "delegated_to_other",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 982.2,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "PAST-01",
+        "category": "completed_past",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 956.275,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "PAST-02",
+        "category": "completed_past",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 966.868,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "PAST-03",
+        "category": "completed_past",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 903.93,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "PAST-04",
+        "category": "completed_past",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 1190.893,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "PAST-05",
+        "category": "completed_past",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 1176.77,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "PAST-06",
+        "category": "completed_past",
+        "relevant": true,
+        "candidate_count": 0,
+        "relevance_latency_ms": 825.515,
+        "extraction_latency_ms": 1064.946,
+        "error": null
+      },
+      {
+        "id": "PAST-07",
+        "category": "completed_past",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 833.843,
+        "extraction_latency_ms": null,
+        "error": null
+      },
+      {
+        "id": "PAST-08",
+        "category": "completed_past",
+        "relevant": false,
+        "candidate_count": 0,
+        "relevance_latency_ms": 847.992,
+        "extraction_latency_ms": null,
+        "error": null
+      }
+    ]
+  },
+  "staging_chat_latency": {
+    "target": "https://orbit-backend-xkgq.onrender.com/api/v1/chat",
+    "provider": "google",
+    "model": "gemini-2.5-flash",
+    "endpoint_streaming": false,
+    "summary": {
+      "request_count": 25,
+      "success_count": 25,
+      "metrics": {
+        "min_ms": 1153.441,
+        "mean_ms": 1617.915,
+        "p50_ms": 1577.519,
+        "p95_ms": 2043.043,
+        "p99_ms": 2162.678,
+        "max_ms": 2190.62
+      },
+      "failures": []
+    },
+    "task_extraction": {
+      "request_count": 25,
+      "success_count": 25,
+      "metrics": {
+        "min_ms": 1361.793,
+        "mean_ms": 1868.985,
+        "p50_ms": 1795.494,
+        "p95_ms": 2566.973,
+        "p99_ms": 3497.44,
+        "max_ms": 3764.174
+      },
+      "failures": []
+    }
+  },
+  "task_cost_measurement": {
+    "provider": "openrouter",
+    "model": "openai/gpt-4.1-mini",
+    "repetitions": 3,
+    "latency_ms": {
+      "summary": {
+        "min_ms": 1457.793,
+        "mean_ms": 2440.343,
+        "p50_ms": 1752.066,
+        "p95_ms": 3875.26,
+        "p99_ms": 4063.989,
+        "max_ms": 4111.171
+      },
+      "task_extraction": {
+        "min_ms": 1746.016,
+        "mean_ms": 1851.415,
+        "p50_ms": 1785.975,
+        "p95_ms": 1998.627,
+        "p99_ms": 2017.529,
+        "max_ms": 2022.255
+      },
+      "planner": {
+        "min_ms": 2578.671,
+        "mean_ms": 2769.57,
+        "p50_ms": 2815.132,
+        "p95_ms": 2904.929,
+        "p99_ms": 2912.911,
+        "max_ms": 2914.906
+      },
+      "proactive_relevance": {
+        "min_ms": 814.331,
+        "mean_ms": 835.8,
+        "p50_ms": 838.891,
+        "p95_ms": 852.65,
+        "p99_ms": 853.873,
+        "max_ms": 854.179
+      },
+      "proactive_extraction": {
+        "min_ms": 1355.38,
+        "mean_ms": 1384.097,
+        "p50_ms": 1363.561,
+        "p95_ms": 1426.372,
+        "p99_ms": 1431.955,
+        "max_ms": 1433.35
+      },
+      "rolling_summary": {
+        "min_ms": 1698.196,
+        "mean_ms": 1738.1,
+        "p50_ms": 1742.713,
+        "p95_ms": 1770.323,
+        "p99_ms": 1772.777,
+        "max_ms": 1773.39
+      }
+    }
+  },
+  "cost": {
+    "rows": [
+      {
+        "purpose": "summary",
+        "model": "openai/gpt-4.1-mini",
+        "calls_measured": 3,
+        "average_input_tokens": 3826.0,
+        "average_output_tokens": 63.0,
+        "average_cost_usd": 0.0016312,
+        "frequency_per_1000_messages": 10,
+        "estimated_cost_per_1000_messages_usd": 0.016312
+      },
+      {
+        "purpose": "task_extraction",
+        "model": "openai/gpt-4.1-mini",
+        "calls_measured": 3,
+        "average_input_tokens": 270.0,
+        "average_output_tokens": 95.0,
+        "average_cost_usd": 0.00026,
+        "frequency_per_1000_messages": 10,
+        "estimated_cost_per_1000_messages_usd": 0.0026
+      },
+      {
+        "purpose": "planner",
+        "model": "openai/gpt-4.1-mini",
+        "calls_measured": 3,
+        "average_input_tokens": 3822.0,
+        "average_output_tokens": 186.0,
+        "average_cost_usd": 0.0018264,
+        "frequency_per_1000_messages": 120,
+        "estimated_cost_per_1000_messages_usd": 0.219168
+      },
+      {
+        "purpose": "proactive_relevance",
+        "model": "openai/gpt-4.1-mini",
+        "calls_measured": 3,
+        "average_input_tokens": 240.0,
+        "average_output_tokens": 7.0,
+        "average_cost_usd": 0.0001072,
+        "frequency_per_1000_messages": 1000,
+        "estimated_cost_per_1000_messages_usd": 0.1072
+      },
+      {
+        "purpose": "proactive_extraction",
+        "model": "openai/gpt-4.1-mini",
+        "calls_measured": 3,
+        "average_input_tokens": 1372.0,
+        "average_output_tokens": 65.0,
+        "average_cost_usd": 0.0006528,
+        "frequency_per_1000_messages": 100,
+        "estimated_cost_per_1000_messages_usd": 0.06528
+      },
+      {
+        "purpose": "rolling_summary",
+        "model": "openai/gpt-4.1-mini",
+        "calls_measured": 3,
+        "average_input_tokens": 248.0,
+        "average_output_tokens": 65.0,
+        "average_cost_usd": 0.0002032,
+        "frequency_per_1000_messages": 33,
+        "estimated_cost_per_1000_messages_usd": 0.006706
+      }
+    ],
+    "total_estimated_cost_per_1000_messages_usd": 0.417266,
+    "assumptions": {
+      "A_eligible_messages_reaching_relevance": 1.0,
+      "A_reason": "Current code has no regex pre-filter; each eligible allowed message calls relevance.",
+      "B_relevant_share_after_relevance": 0.1,
+      "B_reason": "Planning assumption; production prevalence is not labelled in usage_logs.",
+      "C_manual_summary_calls": 10,
+      "C_manual_task_extraction_calls": 10,
+      "D_regular_chat_turns": 120,
+      "D_average_planner_rounds": 1.0,
+      "rolling_summary_calls": 33
+    }
+  }
+}

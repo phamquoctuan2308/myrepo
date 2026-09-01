@@ -1,0 +1,106 @@
+{
+  "run_at": "2026-08-29T07:21:08.703889+00:00",
+  "environment": "staging",
+  "target": "https://orbit-backend-xkgq.onrender.com/api/v1/chat",
+  "database": "deployment PostgreSQL",
+  "latency": {
+    "summary": {
+      "request_count": 25,
+      "success_count": 25,
+      "metrics": {
+        "min_ms": 904.464,
+        "mean_ms": 4173.382,
+        "p50_ms": 1260.351,
+        "p95_ms": 8010.157,
+        "p99_ms": 49254.422,
+        "max_ms": 61985.29
+      },
+      "failures": []
+    },
+    "task_extraction": {
+      "request_count": 25,
+      "success_count": 25,
+      "metrics": {
+        "min_ms": 1237.453,
+        "mean_ms": 4224.569,
+        "p50_ms": 1417.374,
+        "p95_ms": 5869.951,
+        "p99_ms": 48883.073,
+        "max_ms": 62339.729
+      },
+      "failures": []
+    },
+    "planner": {
+      "request_count": 5,
+      "success_count": 4,
+      "metrics": {
+        "min_ms": 2155.264,
+        "mean_ms": 4336.209,
+        "p50_ms": 2964.055,
+        "p95_ms": 8419.351,
+        "p99_ms": 9093.04,
+        "max_ms": 9261.462
+      },
+      "failures": [
+        {
+          "index": 1,
+          "elapsed_ms": 60688.972,
+          "status_code": 500,
+          "agent_status": null,
+          "passed": false
+        }
+      ]
+    }
+  },
+  "daily_token_budget": 300000,
+  "usage_by_purpose": {
+    "summary": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "observed_calls": 26,
+      "expected_calls": 25,
+      "average_input_tokens": 448.0,
+      "average_output_tokens": 50.85,
+      "average_total_tokens": 498.85,
+      "average_cost_usd": 9.771e-05
+    },
+    "task_extraction": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "observed_calls": 26,
+      "expected_calls": 25,
+      "average_input_tokens": 476.0,
+      "average_output_tokens": 94.0,
+      "average_total_tokens": 570.0,
+      "average_cost_usd": 0.0001278
+    },
+    "planner": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "observed_calls": 4,
+      "expected_calls": 5,
+      "average_input_tokens": 3905.0,
+      "average_output_tokens": 104.75,
+      "average_total_tokens": 4009.75,
+      "average_cost_usd": 0.0006486
+    },
+    "proactive_relevance": {
+      "observed_calls": 40,
+      "expected_calls": 40,
+      "average_total_tokens": 427.6,
+      "average_cost_usd": 7.24e-05
+    }
+  },
+  "frequency_assumptions_per_1000_messages": {
+    "summary": 10,
+    "task_extraction": 10,
+    "planner": 120,
+    "proactive_relevance": 1000
+  },
+  "known_cost_subtotal_per_1000_messages_usd": 0.152487,
+  "unmeasured_cost_components": [
+    "proactive_extraction",
+    "rolling_summary"
+  ],
+  "cost_total_is_complete": false
+}
