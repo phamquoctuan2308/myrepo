@@ -334,7 +334,7 @@ Chỉ CSS trong `@media`, layout desktop (grid 3–4 cột) không đổi:
 > Mentor review: doc cần thể hiện rõ **solution + mindset trong bài toán + metric cho bài toán**;
 > multi-agent chỉ là future work, không phải nội dung nộp lần này.
 
-- Thêm [SOLUTION.md](SOLUTION.md) ở gốc repo — một mạch đọc duy nhất: bài toán & cách nhóm đọc đề
+- Thêm [SOLUTION.md](docs/SOLUTION.md) — một mạch đọc duy nhất: bài toán & cách nhóm đọc đề
   (4 ràng buộc + cách diễn giải từng cái) → 8 nguyên tắc thiết kế (mindset) kèm nơi hiện trong code
   → giải pháp (kiến trúc + bảng "vì sao lệch tech stack gợi ý") → metric (north-star + bảng *mỗi
   ràng buộc → metric → gate → kết quả đo gần nhất → nguồn*) → kết quả so với đề bài → hạn chế đã

@@ -1,11 +1,13 @@
 # Requirement Traceability Matrix
 
+> Ma trận chính ánh xạ yêu cầu Personal Agent trong đề bài gốc. Workspace Multi-Agent là phần phát triển mở rộng; evidence release riêng sẽ nằm tại `eval/workspace/` khi được thực hiện.
+
 Ma trận này nối yêu cầu quan trọng với test tự động, code thực thi và bằng chứng thủ công. Trạng thái
 `Covered` nghĩa là đã có test; không tự động có nghĩa toàn bộ release gate đã PASS.
 
 | ID | Requirement | Automated test | Implementation | Evidence | Status |
 |---|---|---|---|---|---|
-| AUTH-01 | Đăng ký, đăng nhập và duy trì phiên | `tests/test_auth.py` | `src/api/auth_routes.py` | `MANUAL_TEST_CASES.md` TC-AUTH-01 | Covered |
+| AUTH-01 | Đăng ký, đăng nhập và duy trì phiên | `tests/test_auth.py` | `src/api/auth_routes.py` | `manual/MANUAL_TEST_REPORT.md` TC-AUTH-01 | Covered |
 | AUTH-02 | User thường không truy cập admin | `tests/test_admin.py`, `tests/test_authorization.py` | `src/api/admin_routes.py`, `src/api/platform_routes.py` | TC-AUTH-02 | Covered |
 | CHAT-01 | Tin nhắn 1-1 và unread chính xác | `tests/test_chat.py` | `src/api/chat_routes.py`, `src/services/chat_service.py` | TC-CHAT-01 | Covered |
 | CHAT-02 | WebSocket chỉ broadcast đúng participant | `tests/test_websocket.py` | `src/websocket/routes.py`, `src/websocket/manager.py` | `results/realtime-load-staging-latest.json` | Unit covered; staging handshake FAIL 403 |

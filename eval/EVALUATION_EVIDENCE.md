@@ -1,5 +1,7 @@
 # Báo cáo đánh giá tổng hợp — Orbit
 
+> **Phạm vi chấm chính:** Personal Agent theo đề bài gốc. Workspace Multi-Agent là phần phát triển mở rộng và chưa được tính là release mặc định trong báo cáo này. Xem [Workspace Development Report](../docs/workspace-development/DEVELOPMENT_REPORT.md).
+
 Tạo lúc `2026-08-29T14:31:38.069228+00:00` từ source revision cơ sở `f0651a1`.
 
 Báo cáo không chuyển bằng chứng còn thiếu thành điểm đạt. `PENDING` nghĩa là đã có runner/protocol nhưng

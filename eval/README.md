@@ -1,24 +1,48 @@
-# Evaluation suite
+# Đánh giá và bằng chứng — Orbit
 
-Orbit tách đánh giá deterministic khỏi những bộ gọi model thật để test thường nhanh và không tốn
-quota.
+## Phạm vi
 
-| Suite | API key | Command | Output |
-|---|---|---|---|
-| Unit/integration + coverage | Không | `python scripts/run_coverage.py` | coverage JSON/XML/HTML + JUnit |
-| Agent quality harness | Không | `pytest tests/test_agent_quality_harness.py -v` | pytest/JUnit |
-| Formal user-agent acceptance | Có | `python scripts/eval_user_agent.py` | acceptance JSON/Markdown |
-| Task extraction | Có | `python scripts/eval_extract_tasks.py` | task metrics JSON |
-| API latency | Không với `/health`; bearer token với `/chat` | `python scripts/benchmark_api_latency.py` | latency JSON/Markdown |
-| User feedback | Không | `python scripts/summarize_user_feedback.py` | aggregate JSON/Markdown |
-| Consolidated evidence | Không | `python scripts/generate_evaluation_evidence.py` | `EVALUATION_EVIDENCE.md` |
+Evaluation chính chấm **Personal Agent**, là sản phẩm nền tảng theo đề bài gốc. Workspace Multi-Agent là phần phát triển mở rộng; kết quả Workspace chỉ được công bố riêng khi có dataset, revision và môi trường tương ứng.
 
-## Thứ tự tạo evidence trước release
+## Tài liệu canonical
 
-1. Chạy coverage và lưu toàn bộ artifact trong `eval/results/`.
-2. Chạy benchmark `/health`, `/ready` và `/api/v1/chat` trên môi trường cần đánh giá.
-3. Chạy task extraction và formal acceptance với model/version được khóa.
-4. Thu thập feedback thật, tối thiểu 5 participant ẩn danh.
-5. Chạy generator tổng hợp và kiểm tra mọi mục P0 không còn `PENDING`/`FAIL`.
+| Tài liệu | Nội dung |
+|---|---|
+| [Business Evaluation](BUSINESS_EVALUATION_REPORT.md) | Tự đánh giá giá trị và readiness business của Personal Agent |
+| [Evaluation Evidence](EVALUATION_EVIDENCE.md) | Báo cáo kỹ thuật tổng hợp theo artifact hiện có |
+| [Traceability Matrix](TRACEABILITY_MATRIX.md) | Yêu cầu → test → code → evidence |
+| [Metrics](METRICS.md) | Định nghĩa metric, gate và protocol |
+| [Manual Test Report](manual/MANUAL_TEST_REPORT.md) | Kiểm thử UI thủ công và ảnh bằng chứng |
+| [Memory Manual Test](manual/MEMORY_TEST_REPORT.md) | Kịch bản kiểm thử memory |
 
-Các file chứa key, raw chat hoặc dữ liệu cá nhân không được đưa vào dataset/evidence.
+## Cấu trúc
+
+- `datasets/`: dữ liệu đánh giá có version, gồm dataset Workspace synthetic.
+- `golden_dataset/`: golden cases của Personal Agent.
+- `manual/`: báo cáo và ảnh kiểm thử thủ công.
+- `results/`: JSON, Markdown, JUnit, Lighthouse và artifact máy tạo.
+- `memory_harness/`, `user_feedback/`: protocol/harness chuyên biệt.
+
+## Lệnh còn tồn tại trong repository
+
+```powershell
+python -m pytest tests -q
+python -m ruff check src tests scripts
+python scripts\eval_user_agent.py
+python scripts\eval_extract_tasks.py
+python scripts\validate_multi_agent_dataset.py
+python scripts\workspace_agent_load_harness.py --help
+```
+
+Các runner gọi model thật cần API key và phải ghi model, prompt/schema version, commit, thời gian và môi trường. Không diễn giải artifact `latest` là hiện trạng production nếu deployment đã đổi revision.
+
+## Quy tắc evidence
+
+- `PASS`: đã chạy và đạt gate.
+- `FAIL`: đã chạy nhưng không đạt.
+- `PENDING`: thiếu dữ liệu hợp lệ; không quy đổi thành pass.
+- `SKIP`: chủ động ngoài phạm vi; không quy đổi thành pass.
+- Không đưa secret, raw chat hoặc dữ liệu cá nhân vào artifact.
+- Feedback synthetic chỉ kiểm tra pipeline, không thay thế người dùng thật.
+
+Workspace release evidence trong tương lai phải đặt dưới `eval/workspace/`; không trộn với điểm Personal Agent hiện tại.

@@ -1,9 +1,20 @@
-# Deliverables — P-132 (Orbit)
+# Bộ bàn giao Orbit P-132
 
-Thư mục gom 3 deliverable chính để tiện xem cùng nhau. **Đây không phải nguồn chính thức duy nhất** — README.md và architecture_diagram.md có bản gốc nằm ở vị trí checklist khoá học yêu cầu; sửa nội dung ở bản gốc trước, rồi đồng bộ lại đây.
+Thư mục này chỉ chứa hoặc liên kết tới sản phẩm bàn giao cuối. Tài liệu nguồn không được sao chép vào đây.
 
-| File | Bản gốc / nguồn chính thức | Ghi chú |
-| --- | --- | --- |
-| [README.md](README.md) | [`/README.md`](../README.md) | Giới thiệu dự án, setup, sample queries, tech stack |
-| [architecture_diagram.md](architecture_diagram.md) | [`/docs/architecture_diagram.md`](../docs/architecture_diagram.md) | Sơ đồ hệ thống (Mermaid) + bảng component |
-| [MANUAL_TEST_CASES.md](MANUAL_TEST_CASES.md) | *(di chuyển hẳn vào đây, không còn bản khác)* | 10/10 test case PASS, ảnh chụp UI thật trong [`evidence/`](evidence/) |
+| Hạng mục | Nguồn chính thức |
+|---|---|
+| Giới thiệu và cách chạy | [README.md](../README.md) |
+| Đề bài gốc | [PROJECT_REQUIREMENTS.md](../docs/PROJECT_REQUIREMENTS.md) |
+| Giải pháp | [SOLUTION.md](../docs/SOLUTION.md) |
+| Kiến trúc | [ARCHITECTURE.md](../docs/ARCHITECTURE.md) |
+| Sơ đồ kiến trúc | [architecture_diagram.md](../docs/architecture_diagram.md) |
+| Báo cáo đánh giá | [EVALUATION_EVIDENCE.md](../eval/EVALUATION_EVIDENCE.md) |
+| Báo cáo kiểm thử thủ công | [MANUAL_TEST_REPORT.md](../eval/manual/MANUAL_TEST_REPORT.md) |
+| Bằng chứng hình ảnh | [`eval/manual/evidence/`](../eval/manual/evidence/) |
+| Báo cáo phát triển Workspace | [DEVELOPMENT_REPORT.md](../docs/workspace-development/DEVELOPMENT_REPORT.md) |
+| Pitch deck dạng Markdown | [PITCH_DECK.md](../presentation/PITCH_DECK.md) |
+| Video demo | [orbit_demo_3min.mp4](orbit_demo_3min.mp4) |
+| Phụ đề video | [demo_video_script.srt](demo_video_script.srt) |
+
+`orbit_demo_3min.mp4` là video demo chính thức. Các log, frame, giọng đọc và video dựng trung gian không phải deliverable cuối.

@@ -1,6 +1,8 @@
 # P-132 — Orbit AI Assistant
 
-Dự án AI20K Build Phase: Orbit là trợ lý AI cá nhân nhúng trong ứng dụng chat, giúp người dùng tóm tắt hội thoại, trích xuất công việc/lịch hẹn, tạo nhắc nhở có xác nhận và quản lý lịch cá nhân. Multi-Agent theo Workspace là **hướng phát triển tiếp theo** để mở rộng Orbit từ trợ lý cá nhân thành trợ lý chuyên môn cho các nhóm trong công ty. Repo gồm **backend** (FastAPI + LangGraph, thư mục `src/`) và **frontend** (React + Vite, thư mục `Frontend/`).
+Dự án AI20K Build Phase: Orbit là trợ lý AI cá nhân nhúng trong ứng dụng chat, giúp người dùng tóm tắt hội thoại, trích xuất công việc/lịch hẹn, tạo nhắc nhở có xác nhận và quản lý lịch cá nhân. Multi-Agent theo Workspace là **phần phát triển mở rộng** để đưa Orbit từ trợ lý cá nhân sang trợ lý chuyên môn cho các nhóm trong công ty. Repo gồm **backend** (FastAPI + LangGraph, thư mục `src/`) và **frontend** (React + Vite, thư mục `Frontend/`).
+
+🎬 [Video demo 3 phút](Deliverables/orbit_demo_3min.mp4) · 📚 [Mục lục tài liệu](docs/README.md) · 🧪 [Đánh giá và bằng chứng](eval/README.md)
 
 ## Mô hình sản phẩm
 
@@ -15,9 +17,9 @@ Hệ thống có hai loại tài khoản:
 
 Personal Agent là flow mặc định của `POST /api/v1/chat` và trang `/assistant`. Mọi hành động có side effect như tạo/sửa/xóa Calendar hoặc Reminder đều phải chờ user xác nhận.
 
-### Hướng mở rộng sau MVP: Multi-Agent theo Workspace
+### Phần phát triển mở rộng: Multi-Agent theo Workspace
 
-Multi-Agent chưa phải flow mặc định của sản phẩm hiện tại. Đây là hướng mở rộng đã được thiết kế để phục vụ bài toán cộng tác nội bộ:
+Multi-Agent chưa phải flow mặc định của sản phẩm hiện tại. Phần này đã có nhiều thành phần code, UI và test, nhưng các feature flag mặc định vẫn tắt và chưa có đủ live acceptance để tuyên bố là release mặc định:
 
 ```text
 Company Root
@@ -27,7 +29,7 @@ Company Root
                                       └── tổng hợp brief hợp lệ
 ```
 
-Khi triển khai giai đoạn này, Personal Agent vẫn được giữ nguyên cho dữ liệu cá nhân. Các Workspace Agent sẽ có scope, membership và tool riêng; Executive Agent chỉ tổng hợp `WorkspaceBrief` đã được kiểm chứng, không đọc raw chat liên phòng ban. Foundation và thiết kế chi tiết nằm trong thư mục [`docs/`](docs/), nhưng các feature flag Multi-Agent hiện mặc định tắt.
+Personal Agent vẫn được giữ nguyên cho dữ liệu cá nhân. Các Workspace Agent có scope, membership và tool riêng; aggregate flow không mặc định đọc raw chat liên phòng ban. Thiết kế và báo cáo phát triển nằm trong [`docs/workspace-development/`](docs/workspace-development/README.md).
 
 ## Hiện có gì
 
@@ -49,12 +51,12 @@ Khi triển khai giai đoạn này, Personal Agent vẫn được giữ nguyên 
 
 - `alembic upgrade head` — nâng cấp schema database theo migration hiện tại.
 - `pytest tests/` — test backend và policy; `ruff check src/ tests/` — lint backend; `npm run build` — build hai frontend.
-- `scripts/seed_multi_agent_demo.py` — dữ liệu synthetic phục vụ thử nghiệm hướng Multi-Agent tương lai, không cần cho flow Personal Agent thông thường.
+- `scripts/seed_delivery_demo.py`, `scripts/seed_quality_demo.py` — dữ liệu synthetic phục vụ thử nghiệm phần Workspace, không cần cho flow Personal Agent thông thường.
 
 ### Chưa xong
 
 - **Deploy online public**: đã có Docker, Render/Vercel và workflow nhưng chưa xác nhận domain production trong source code.
-- **Mở rộng Multi-Agent**: hiện là roadmap sau MVP. Repo đã có foundation/thiết kế thử nghiệm cho Company Root, Agent Workspace, Delivery/QA/Executive profile, scope guard và `WorkspaceBrief`, nhưng chưa phải trải nghiệm mặc định cho người dùng.
+- **Phát hành phần Workspace**: repo đã có control plane, agent runtime, UI và test đáng kể, nhưng feature flag còn tắt mặc định và chưa có live/staging acceptance riêng trên cùng revision.
 - **Nghiệp vụ chuyên môn mở rộng**: milestone, dependency và các nguồn dữ liệu phòng ban cần được bổ sung dần bằng resource thật; khi thiếu nguồn, hệ thống phải báo data gap thay vì tự suy đoán.
 
 ## Kiến trúc
@@ -88,12 +90,12 @@ Khi triển khai giai đoạn này, Personal Agent vẫn được giữ nguyên 
 Hiện tại
   user → auth/consent → Personal Agent LangGraph → personal tools → câu trả lời/HITL
 
-Sau MVP
+Phần phát triển mở rộng
   user + workspace membership → deterministic router → Delivery/QA Agent
   Executive membership → validated WorkspaceBrief → Executive Agent
 ```
 
-Trong giai đoạn hiện tại, `requested_scope=personal` là mặc định. `requested_scope=workspace|aggregate` chỉ dành cho prototype và giai đoạn mở rộng sau MVP; quyền thật không đến từ field client tự khai mà được backend resolve từ membership, resource binding và policy.
+Trong giai đoạn hiện tại, Personal Agent là mặc định. Workspace/aggregate scope thuộc phần phát triển mở rộng; quyền thật không đến từ field client tự khai mà được backend resolve từ membership, resource binding và policy.
 
 ## Cách chạy web (local development)
 
@@ -166,7 +168,7 @@ Mở `http://localhost:5173` cho User app và `http://localhost:5174` cho Admin 
 5. Mở `http://localhost:5174/register`, dùng `ADMIN_BOOTSTRAP_KEY` để tạo platform admin đầu tiên, rồi đăng nhập tại `/login` của Admin app.
 6. Vào `/tasks/inbox` để xem task suggestion, task quá hạn và task sắp đến hạn.
 7. Vào `/calendar` để kết nối Google Calendar per-user nếu đã cấu hình OAuth.
-8. Các trang `/workspaces` và `/workspace-briefs` thuộc hướng Multi-Agent mở rộng; chỉ dùng khi team đã provision workspace và bật đúng feature flags.
+8. Các trang `/workspaces`, `/channels` và `/workspace-agent` thuộc phần phát triển Workspace; chỉ dùng khi team đã provision đúng membership/source và bật feature flags.
 
 ### 5. Test Calendar cùng nhiều thành viên
 
@@ -221,26 +223,22 @@ Docker Compose chạy backend ở cổng 8000; frontend chạy riêng bằng npm
 | Calendar / Scheduler | Google Calendar API, APScheduler |
 | Migration | Alembic |
 | Test / Lint | pytest, pytest-asyncio, httpx, ruff |
-| Multi-Agent sau MVP | Agent Workspace, deterministic router, scope/resource guard, WorkspaceBrief và Executive aggregation |
+| Workspace development | Agent Workspace, router/policy, Delivery/QA runtime và aggregate foundation |
 
-## Tài liệu định hướng Multi-Agent
+## Tài liệu phần phát triển Workspace
 
-- [docs/README.md](docs/README.md) — mục lục và quy tắc single source of truth.
-- [docs/BRIEF.md](docs/BRIEF.md) — hướng mở rộng sản phẩm theo Workspace.
-- [docs/PRD.md](docs/PRD.md) — yêu cầu và acceptance criteria cho giai đoạn mở rộng.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data boundary, router, agent runtime và security.
-- [docs/AGENT_SYSTEM_DESIGN.md](docs/AGENT_SYSTEM_DESIGN.md) — prompt, tool, guardrail, memory và HITL của Personal/Multi-Agent.
-- [docs/ENTERPRISE_WORKSPACE_FOUNDATION.md](docs/ENTERPRISE_WORKSPACE_FOUNDATION.md) — Company Root, Workspace, role và membership.
-- [docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md](docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md) — kế hoạch phát triển sau MVP.
-- [docs/MULTI_AGENT_TEST_DATASET.md](docs/MULTI_AGENT_TEST_DATASET.md) — dataset thử nghiệm hướng Multi-Agent.
+- [Workspace Development Index](docs/workspace-development/README.md) — phạm vi và cách đọc trạng thái.
+- [Product Brief](docs/workspace-development/BRIEF.md) và [PRD](docs/workspace-development/PRD.md) — giá trị, yêu cầu và acceptance của phần mở rộng.
+- [Workspace Architecture](docs/workspace-development/ARCHITECTURE.md) — data boundary, router, runtime và security.
+- [Development Report](docs/workspace-development/DEVELOPMENT_REPORT.md) — phần đã triển khai, đã test và chưa phát hành.
+- [Multi-Agent Dataset](eval/datasets/MULTI_AGENT_DATASET.md) — taxonomy và dataset synthetic.
 
 ## Tài liệu khác
 
-- [CLAUDE.md](CLAUDE.md) — hướng dẫn cho AI coding assistant.
 - [Frontend/README.md](Frontend/README.md) — cấu trúc và cách chạy hai frontend.
-- [Frontend/detai.md](Frontend/detai.md) — đề bài gốc của dự án.
-- [ARCHITECTURE.md](ARCHITECTURE.md) — kiến trúc runtime tương thích và con trỏ tới tài liệu canonical.
-- [ROADMAP.md](ROADMAP.md) — trạng thái yêu cầu và việc còn lại.
-- [DEPLOYMENT.md](DEPLOYMENT.md) — kế hoạch hạ tầng production.
-- [docs/deploy.md](docs/deploy.md) — hướng dẫn triển khai dashboard từng bước.
+- [Đề bài gốc](docs/PROJECT_REQUIREMENTS.md) — bài toán và yêu cầu đầu ra.
+- [Giải pháp](docs/SOLUTION.md) — cách tiếp cận và quyết định phạm vi.
+- [Kiến trúc](docs/ARCHITECTURE.md) — kiến trúc sản phẩm nền tảng và boundary Workspace.
+- [Deployment](docs/DEPLOYMENT.md) — hướng dẫn chạy và triển khai.
+- [Evaluation](eval/README.md) — metric, báo cáo và bằng chứng.
 - [WORKLOG.md](WORKLOG.md) — nhật ký thay đổi theo ngày của cả nhóm.
