@@ -16,6 +16,7 @@ Tài liệu được chia theo đúng phạm vi bàn giao:
 | [Architecture Diagram](architecture_diagram.md) | Sơ đồ rút gọn phục vụ trình bày |
 | [Deployment](DEPLOYMENT.md) | Cách chạy và triển khai |
 | [Nhật ký cải tiến](journal.md) | Tóm tắt thay đổi hằng ngày từ 27/07/2026 đến 01/09/2026 |
+| [Worklog](worklog.md) | Lịch sử commit, các mốc chính và cách tái tạo Git log |
 
 ## Phần phát triển Workspace
 
