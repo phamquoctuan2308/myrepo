@@ -15,6 +15,7 @@ Tài liệu được chia theo đúng phạm vi bàn giao:
 | [Agent System Design](AGENT_SYSTEM_DESIGN.md) | Prompt, tool, memory, guardrail và HITL |
 | [Architecture Diagram](architecture_diagram.md) | Sơ đồ rút gọn phục vụ trình bày |
 | [Deployment](DEPLOYMENT.md) | Cách chạy và triển khai |
+| [Nhật ký cải tiến](journal.md) | Tóm tắt thay đổi hằng ngày từ 27/07/2026 đến 01/09/2026 |
 
 ## Phần phát triển Workspace
 
@@ -22,7 +23,7 @@ Tài liệu được chia theo đúng phạm vi bàn giao:
 
 ## Đánh giá và bằng chứng
 
-Toàn bộ phương pháp, báo cáo, test thủ công và kết quả máy nằm trong [`eval/`](../eval/README.md). Không đặt bản sao báo cáo đánh giá trong `docs/` hoặc `Deliverables/`.
+Các báo cáo dành cho người đọc nằm tại [Evaluation Evidence](EVALUATION_EVIDENCE.md) và [Business Evaluation](BUSINESS_EVALUATION_REPORT.md). Dataset, test thủ công và kết quả máy vẫn nằm trong [`eval/`](../eval/README.md).
 
 ## Quy tắc nguồn chính thức
 
