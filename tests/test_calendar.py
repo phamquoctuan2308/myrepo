@@ -1,4 +1,5 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from google.oauth2.credentials import Credentials
@@ -8,7 +9,7 @@ import src.db.session as db_session
 from src.auth.crypto import decrypt_secret
 from src.auth.security import create_access_token
 from src.db.models import GoogleCalendarCredential
-from src.services import calendar_service, google_credentials
+from src.services import calendar_service, google_credentials, reminder_service
 from src.websocket.manager import manager
 
 
@@ -23,6 +24,25 @@ async def _credential(user_id: str) -> GoogleCalendarCredential | None:
                 select(GoogleCalendarCredential).where(GoogleCalendarCredential.user_id == user_id)
             )
         ).scalar_one_or_none()
+
+
+def test_calendar_oauth_uses_event_only_scope():
+    assert google_credentials.SCOPES == ["https://www.googleapis.com/auth/calendar.events"]
+
+
+def test_calendar_oauth_does_not_merge_legacy_grants(monkeypatch):
+    settings = google_credentials.get_settings().model_copy(
+        update={
+            "google_calendar_client_id": "test-calendar-client",
+            "google_calendar_client_secret": "test-calendar-secret",
+            "google_calendar_redirect_uri": "http://localhost:8000/api/v1/calendar/oauth/callback",
+        }
+    )
+    monkeypatch.setattr(google_credentials, "get_settings", lambda: settings)
+
+    query = parse_qs(urlparse(google_credentials.build_authorization_url("user-1")).query)
+    assert query["scope"] == google_credentials.SCOPES
+    assert "include_granted_scopes" not in query
 
 
 @pytest.mark.asyncio
@@ -103,6 +123,41 @@ async def test_create_event_uses_callers_calendar(client, auth_headers, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_update_and_delete_event_write_to_callers_google_calendar(client, auth_headers, monkeypatch):
+    caller = await _user_id(client, auth_headers)
+    service = MagicMock()
+    service.events.return_value.patch.return_value.execute.return_value = {
+        "id": "evt-2",
+        "summary": "Updated design sync",
+        "start": {"dateTime": "2026-08-11T10:00:00+07:00"},
+        "end": {"dateTime": "2026-08-11T10:30:00+07:00"},
+    }
+    service.events.return_value.delete.return_value.execute.return_value = None
+
+    async def fake_service(user_id):
+        assert user_id == caller
+        return service
+
+    monkeypatch.setattr(calendar_service, "_service", fake_service)
+    updated = await client.patch(
+        "/api/v1/calendar/events/evt-2",
+        json={"summary": "Updated design sync"},
+        headers=auth_headers,
+    )
+    deleted = await client.delete("/api/v1/calendar/events/evt-2", headers=auth_headers)
+
+    assert updated.status_code == 200
+    assert updated.json()["title"] == "Updated design sync"
+    assert deleted.status_code == 204
+    assert service.events.return_value.patch.call_args.kwargs["calendarId"] == "primary"
+    assert service.events.return_value.patch.call_args.kwargs["eventId"] == "evt-2"
+    assert service.events.return_value.delete.call_args.kwargs == {
+        "calendarId": "primary",
+        "eventId": "evt-2",
+    }
+
+
+@pytest.mark.asyncio
 async def test_connection_status_and_oauth_state_are_user_bound(client, auth_headers):
     status_response = await client.get("/api/v1/calendar/connection", headers=auth_headers)
     assert status_response.json()["connected"] is False
@@ -160,3 +215,44 @@ async def test_poll_only_checks_online_connected_users(monkeypatch):
     finally:
         manager.active.pop("online", None)
     poll.assert_awaited_once_with("online")
+
+
+@pytest.mark.asyncio
+async def test_google_changes_are_pushed_back_to_orbit(monkeypatch):
+    changed = {
+        "id": "changed-event",
+        "summary": "Changed in Google",
+        "start": {"dateTime": "2026-08-11T10:00:00+07:00"},
+        "end": {"dateTime": "2026-08-11T10:30:00+07:00"},
+    }
+    cancelled = {"id": "cancelled-event", "status": "cancelled"}
+    monkeypatch.setattr(google_credentials, "get_sync_token", AsyncMock(return_value="old-cursor"))
+    monkeypatch.setattr(
+        calendar_service,
+        "_fetch_changes",
+        AsyncMock(return_value=([changed, cancelled], "next-cursor")),
+    )
+    broadcast = AsyncMock()
+    reconcile = AsyncMock()
+    remove = AsyncMock()
+    set_cursor = AsyncMock()
+    monkeypatch.setattr(calendar_service, "broadcast_change", broadcast)
+    monkeypatch.setattr(reminder_service, "reconcile_calendar_event_reminder", reconcile)
+    monkeypatch.setattr(reminder_service, "remove_calendar_event_reminder", remove)
+    monkeypatch.setattr(google_credentials, "set_sync_token", set_cursor)
+
+    await calendar_service._poll_one_user("owner")
+
+    broadcast.assert_has_awaits(
+        [
+            call(
+                "owner",
+                "calendar_event_updated",
+                {"event": calendar_service.to_out_dict(changed)},
+            ),
+            call("owner", "calendar_event_deleted", {"event_id": "cancelled-event"}),
+        ]
+    )
+    reconcile.assert_awaited_once()
+    remove.assert_awaited_once_with("owner", "cancelled-event")
+    set_cursor.assert_awaited_once_with("owner", "next-cursor")

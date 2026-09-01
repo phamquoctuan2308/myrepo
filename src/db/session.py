@@ -1,8 +1,7 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from sqlalchemy import inspect, text
-from sqlalchemy.engine import Connection
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -68,71 +67,6 @@ async def _add_missing_user_columns(conn) -> None:
         await conn.execute(text("ALTER TABLE users ADD COLUMN preferences JSON NOT NULL DEFAULT '{}'"))
 
 
-def _apply_legacy_schema_compatibility(connection: Connection) -> None:
-    """Keep databases created by the former workspace model usable.
-
-    That model added a non-null ``users.platform_role`` column without a
-    database default. The current model intentionally no longer maps the
-    column, so inserts would otherwise fail after switching branches even
-    though the legacy data itself is harmless. A server-side default preserves
-    existing values and lets current inserts omit the retired column.
-    """
-    inspector = inspect(connection)
-    if "users" not in inspector.get_table_names():
-        return
-
-    columns = {column["name"]: column for column in inspector.get_columns("users")}
-    platform_role = columns.get("platform_role")
-    if platform_role is not None and platform_role.get("default") is None:
-        connection.execute(text("ALTER TABLE users ALTER COLUMN platform_role SET DEFAULT 'user'"))
-
-    # ``create_all`` cannot add columns to existing tables. These additive, idempotent changes
-    # preserve every legacy row while enabling structured cross-session memory.
-    memory_columns = {
-        "memory_type": "VARCHAR DEFAULT 'fact' NOT NULL",
-        "status": "VARCHAR DEFAULT 'active' NOT NULL",
-        "source_type": "VARCHAR DEFAULT 'manual' NOT NULL",
-        "source_id": "VARCHAR",
-        "source_thread_id": "VARCHAR",
-        "source_conversation_id": "VARCHAR",
-        "provenance": "JSON DEFAULT '{}'::json NOT NULL",
-        "confidence": "DOUBLE PRECISION DEFAULT 1.0 NOT NULL",
-        "importance": "DOUBLE PRECISION DEFAULT 0.5 NOT NULL",
-        "sensitivity": "VARCHAR DEFAULT 'normal' NOT NULL",
-        "user_confirmed": "BOOLEAN DEFAULT TRUE NOT NULL",
-        "expires_at": "TIMESTAMP WITH TIME ZONE",
-        "updated_at": "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL",
-        "last_accessed_at": "TIMESTAMP WITH TIME ZONE",
-        "access_count": "INTEGER DEFAULT 0 NOT NULL",
-        "content_hash": "VARCHAR DEFAULT '' NOT NULL",
-        "embedding": "JSON",
-        "embedding_model": "VARCHAR",
-    }
-    if "memories" in inspector.get_table_names():
-        existing = {column["name"] for column in inspector.get_columns("memories")}
-        for name, ddl in memory_columns.items():
-            if name not in existing:
-                connection.execute(text(f"ALTER TABLE memories ADD COLUMN {name} {ddl}"))
-        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_memories_status ON memories (status)"))
-        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_memories_memory_type ON memories (memory_type)"))
-        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_memories_content_hash ON memories (content_hash)"))
-        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_memories_source_thread_id ON memories (source_thread_id)"))
-
-    thread_columns = {
-        "session_summary": "TEXT DEFAULT '' NOT NULL",
-        "compacted_message_count": "INTEGER DEFAULT 0 NOT NULL",
-        "summary_updated_at": "TIMESTAMP WITH TIME ZONE",
-        "last_memory_maintenance_at": "TIMESTAMP WITH TIME ZONE",
-    }
-    if "assistant_threads" in inspector.get_table_names():
-        existing = {column["name"] for column in inspector.get_columns("assistant_threads")}
-        for name, ddl in thread_columns.items():
-            if name not in existing:
-                connection.execute(text(f"ALTER TABLE assistant_threads ADD COLUMN {name} {ddl}"))
-
-
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await _add_missing_user_columns(conn)
-        await conn.run_sync(_apply_legacy_schema_compatibility)

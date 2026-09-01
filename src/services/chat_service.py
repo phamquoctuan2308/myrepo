@@ -5,10 +5,10 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import (
+    AgentWorkspaceConversation,
     AIPermission,
     Conversation,
     ConversationParticipant,
-    ConversationRollingSummary,
     EventCandidate,
     EventExtractionCursor,
     Message,
@@ -17,7 +17,7 @@ from src.db.models import (
     WorkspaceMembership,
 )
 from src.models.auth_schemas import UserPublic
-from src.models.chat_schemas import ConversationSummary, MessageOut
+from src.models.chat_schemas import ConversationReadReceiptOut, ConversationSummary, MessageOut
 from src.services.authorization_service import (
     get_authorized_participant_ids,
     require_conversation_access,
@@ -124,15 +124,6 @@ async def set_ai_permission(
             )
             .values(status="invalidated", invalidated_reason="source_consent_revoked")
         )
-        # The rolling conversation summary is a persisted artifact re-injected into every future
-        # agent turn - unlike a live per-request read, it can't just stop selecting this sender's
-        # messages going forward. Flag it for a full rebuild so already-baked prose from the
-        # revoked sender doesn't keep circulating. No-op if no row exists yet.
-        await db.execute(
-            update(ConversationRollingSummary)
-            .where(ConversationRollingSummary.conversation_id == conversation_id)
-            .values(needs_reset=True)
-        )
     await db.commit()
     await db.refresh(permission)
     return permission
@@ -208,9 +199,15 @@ async def create_message(db: AsyncSession, conversation_id: str, sender_id: str,
     conversation = await db.get(Conversation, conversation_id)
     if conversation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
-    message = Message(conversation_id=conversation_id, sender_id=sender_id, content=content)
+    now = datetime.now(UTC)
+    message = Message(
+        conversation_id=conversation_id,
+        sender_id=sender_id,
+        content=content,
+        created_at=now,
+    )
     db.add(message)
-    conversation.updated_at = datetime.now(UTC)
+    conversation.updated_at = now
     await db.execute(
         update(ConversationParticipant)
         .where(
@@ -218,6 +215,18 @@ async def create_message(db: AsyncSession, conversation_id: str, sender_id: str,
             ConversationParticipant.revoked_at.is_(None),
         )
         .values(hidden_at=None)
+    )
+    # Sending from a conversation means the sender has seen everything up to this point. Advancing
+    # their read cursor prevents older inbound messages from resurfacing as unread after reload,
+    # and makes an own last message consistently render in the normal/read style.
+    await db.execute(
+        update(ConversationParticipant)
+        .where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.user_id == sender_id,
+            ConversationParticipant.revoked_at.is_(None),
+        )
+        .values(last_read_at=now)
     )
     await db.commit()
     await db.refresh(message)
@@ -280,23 +289,45 @@ async def leave_group_conversation(
         .where(EventCandidate.conversation_id == conversation_id, EventCandidate.status == "suggested")
         .values(status="invalidated", invalidated_reason="conversation_membership_changed")
     )
-    # A group's readable/eligible set is all-or-nothing while ai_enabled stays on (see
-    # proactive_service._permission_scope) - a participant leaving is the only way that roster can
-    # shrink without also flipping ai_enabled off. Same rebuild-on-shrink reasoning as
-    # set_ai_permission's contribution_revoked branch.
-    await db.execute(
-        update(ConversationRollingSummary)
-        .where(ConversationRollingSummary.conversation_id == conversation_id)
-        .values(needs_reset=True)
-    )
     await db.commit()
     return [row.user_id for row in remaining if row.user_id], False
 
 
-async def mark_read(db: AsyncSession, conversation_id: str, user_id: str) -> None:
+async def mark_read(db: AsyncSession, conversation_id: str, user_id: str) -> datetime:
     participant = await assert_participant(db, conversation_id, user_id)
-    participant.last_read_at = datetime.now(UTC)
+    read_at = datetime.now(UTC)
+    participant.last_read_at = read_at
     await db.commit()
+    return read_at
+
+
+async def get_read_receipts(
+    db: AsyncSession,
+    conversation_id: str,
+    *,
+    exclude_user_id: str,
+) -> list[ConversationReadReceiptOut]:
+    """Return active participants' read cursors for rendering per-message seen avatars."""
+    rows = (
+        await db.execute(
+            select(ConversationParticipant, User)
+            .join(User, User.id == ConversationParticipant.user_id)
+            .where(
+                ConversationParticipant.conversation_id == conversation_id,
+                ConversationParticipant.user_id != exclude_user_id,
+                ConversationParticipant.revoked_at.is_(None),
+            )
+            .order_by(User.display_name, User.id)
+        )
+    ).all()
+    return [
+        ConversationReadReceiptOut(
+            user_id=user.id,
+            display_name=user.display_name,
+            read_at=_iso(participant.last_read_at),
+        )
+        for participant, user in rows
+    ]
 
 
 async def get_first_unread_message_id(db: AsyncSession, conversation_id: str, user_id: str) -> str | None:
@@ -348,36 +379,33 @@ async def get_or_create_direct_conversation(
 ) -> Conversation:
     if user_a_id == user_b_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot create a conversation with self")
-    # workspace_id is optional from the client - resolve_workspace_for_user falls back to the
-    # caller's personal workspace, same default used by GET /users and GET /conversations.
+    if workspace_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
     workspace = await resolve_workspace_for_user(db, user_a_id, workspace_id)
-    if workspace.type == "organization":
-        await require_workspace_member(db, await db.get(User, user_a_id), workspace.id)
-        await _assert_workspace_participants(db, workspace.id, {user_a_id, user_b_id})
-    else:
-        # Personal workspaces have no membership roster to scope by - plain 1:1 chat between
-        # any two active users. workspace.id is stored on the Conversation row only because
-        # workspace_id is a required FK slot; it does not restrict who can see the conversation
-        # (see list_conversations, which does not filter personal-workspace results by it).
-        other = await db.get(User, user_b_id)
-        if other is None or not other.is_active:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active user not found")
-
-    # Personal-workspace conversations aren't anchored to a single shared workspace_id (each
-    # side's own personal workspace differs), so dedup by participant pair across all of the
-    # caller's direct conversations rather than scoping the search to one workspace_id.
-    candidate_query = (
-        select(ConversationParticipant.conversation_id)
-        .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
-        .where(
-            Conversation.type == "direct",
-            ConversationParticipant.user_id == user_a_id,
-            ConversationParticipant.revoked_at.is_(None),
+    if workspace.type != "organization":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Direct conversations require an organization workspace",
         )
+    await require_workspace_member(db, await db.get(User, user_a_id), workspace_id)
+    await _assert_workspace_participants(db, workspace_id, {user_a_id, user_b_id})
+
+    candidate_ids = (
+        (
+            await db.execute(
+                select(ConversationParticipant.conversation_id)
+                .join(Conversation, Conversation.id == ConversationParticipant.conversation_id)
+                .where(
+                    Conversation.workspace_id == workspace_id,
+                    Conversation.type == "direct",
+                    ConversationParticipant.user_id == user_a_id,
+                    ConversationParticipant.revoked_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
-    if workspace.type == "organization":
-        candidate_query = candidate_query.where(Conversation.workspace_id == workspace.id)
-    candidate_ids = (await db.execute(candidate_query)).scalars().all()
     for cid in candidate_ids:
         participant_ids = (
             (
@@ -394,7 +422,7 @@ async def get_or_create_direct_conversation(
         if set(participant_ids) == {user_a_id, user_b_id}:
             return await db.get(Conversation, cid)
 
-    conversation = Conversation(workspace_id=workspace.id, type="direct", name=None, created_by=user_a_id)
+    conversation = Conversation(workspace_id=workspace_id, type="direct", name=None, created_by=user_a_id)
     db.add(conversation)
     await db.flush()
     db.add_all(
@@ -426,18 +454,30 @@ async def create_group_conversation(
     member_ids: list[str],
     name: str,
     workspace_id: str | None = None,
+    *,
+    ai_enabled: bool = False,
+    commit: bool = True,
 ) -> Conversation:
+    if workspace_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="workspace_id is required")
     workspace = await resolve_workspace_for_user(db, creator_id, workspace_id)
-    if workspace.type == "organization":
-        await _assert_workspace_participants(db, workspace.id, {creator_id, *member_ids})
-    else:
-        # Personal workspace: no membership roster - any active user can be added directly.
-        rows = (
-            await db.execute(select(User.id).where(User.id.in_(member_ids), User.is_active.is_(True)))
-        ).scalars().all()
-        if set(rows) != set(member_ids):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active user not found")
-    conversation = Conversation(workspace_id=workspace.id, type="group", name=name, created_by=creator_id)
+    if workspace.type != "organization":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Group conversations require an organization workspace",
+        )
+    await _assert_workspace_participants(db, workspace_id, {creator_id, *member_ids})
+    now = datetime.now(UTC)
+    conversation = Conversation(
+        workspace_id=workspace_id,
+        type="group",
+        name=name,
+        created_by=creator_id,
+        ai_enabled=ai_enabled,
+        ai_policy_version=1 if ai_enabled else 0,
+        ai_enabled_by_user_id=creator_id if ai_enabled else None,
+        ai_enabled_at=now if ai_enabled else None,
+    )
     db.add(conversation)
     await db.flush()
     all_member_ids = {creator_id, *member_ids}
@@ -453,8 +493,11 @@ async def create_group_conversation(
             for member_id in all_member_ids
         ]
     )
-    await db.commit()
-    await db.refresh(conversation)
+    if commit:
+        await db.commit()
+        await db.refresh(conversation)
+    else:
+        await db.flush()
     return conversation
 
 
@@ -518,6 +561,14 @@ async def build_conversation_summary(
         permission = await get_ai_permission(db, conversation.id, current_user_id)
         ai_permission_granted = permission.granted if permission is not None else False
 
+    channel_mapping = (
+        await db.execute(
+            select(AgentWorkspaceConversation).where(
+                AgentWorkspaceConversation.conversation_id == conversation.id,
+            )
+        )
+    ).scalar_one_or_none()
+
     return ConversationSummary(
         id=conversation.id,
         workspace_id=conversation.workspace_id,
@@ -530,4 +581,8 @@ async def build_conversation_summary(
         updated_at=_iso(conversation.updated_at),
         my_resource_role=my_participant.resource_role if my_participant else None,
         ai_enabled=conversation.ai_enabled,
+        scope="channel" if channel_mapping is not None else "personal",
+        agent_workspace_id=channel_mapping.agent_workspace_id if channel_mapping is not None else None,
+        channel_classification=channel_mapping.classification if channel_mapping is not None else None,
+        channel_kind=channel_mapping.channel_kind if channel_mapping is not None else None,
     )

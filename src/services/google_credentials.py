@@ -2,8 +2,6 @@ import logging
 import os
 from datetime import UTC, datetime, timedelta
 
-import google_auth_httplib2
-import httplib2
 import httpx
 import jwt
 from google.auth.exceptions import RefreshError
@@ -19,15 +17,13 @@ from src.db.models import GoogleCalendarCredential
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+# Orbit only reads and writes events. It does not manage calendar sharing, ACLs, or
+# calendar properties, so requesting the broader /auth/calendar scope would violate
+# Google's least-privilege guidance and make public OAuth review unnecessarily broad.
+SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 _AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
 _STATE_PURPOSE = "calendar_oauth"
-# httplib2/requests default to no timeout at all, so a stalled route to Google (e.g. an IPv6
-# path with no real connectivity, common on Windows dev machines) blocks for the OS-level TCP
-# timeout - tens of seconds - instead of failing fast. Bound every outbound Google call instead.
-# Public: reused by calendar_service.py when building the per-request Calendar API client.
-HTTP_TIMEOUT_SECONDS = 10
 
 
 class CalendarNotConnectedError(Exception):
@@ -50,6 +46,18 @@ def _client_config() -> dict:
             "token_uri": _TOKEN_URI,
         }
     }
+
+
+def validate_configuration() -> None:
+    """Fail before OAuth when credentials cannot be encrypted on this server."""
+    _client_config()
+    probe = "calendar-oauth-readiness"
+    try:
+        encrypted = encrypt_secret(probe)
+        if decrypt_secret(encrypted) != probe:
+            raise RuntimeError("credential encryption round-trip failed")
+    except (CredentialCryptoError, RuntimeError, ValueError) as exc:
+        raise RuntimeError("CREDENTIAL_ENCRYPTION_KEY is invalid") from exc
 
 
 def _build_flow(state: str | None = None) -> Flow:
@@ -91,25 +99,17 @@ def read_oauth_state(state: str) -> str:
 
 def build_authorization_url(user_id: str) -> str:
     flow = _build_flow(state=make_oauth_state(user_id))
-    url, _ = flow.authorization_url(access_type="offline", prompt="consent", include_granted_scopes="true")
+    # Do not merge grants previously issued to other OAuth clients in this Cloud project.
+    # Orbit used to request the broader Calendar scope; combining that old grant with the
+    # event-only scope makes oauthlib reject Google's token response as a scope mismatch.
+    url, _ = flow.authorization_url(access_type="offline", prompt="consent")
     return url
 
 
 def exchange_code(code: str) -> Credentials:
     flow = _build_flow()
-    flow.fetch_token(code=code, timeout=HTTP_TIMEOUT_SECONDS)
+    flow.fetch_token(code=code)
     return flow.credentials
-
-
-def fetch_google_email(creds: Credentials) -> str:
-    from googleapiclient.discovery import build
-
-    try:
-        http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=HTTP_TIMEOUT_SECONDS))
-        return build("calendar", "v3", http=http).calendarList().get(calendarId="primary").execute().get("id", "")
-    except Exception:  # noqa: BLE001 - display metadata is best-effort
-        logger.warning("Could not resolve connected Google Calendar email", exc_info=True)
-        return ""
 
 
 async def _row_for_user(db, user_id: str) -> GoogleCalendarCredential | None:
@@ -135,18 +135,6 @@ async def save_credentials(user_id: str, creds: Credentials, google_email: str =
         if google_email:
             row.google_email = google_email
         await db.commit()
-
-
-async def update_google_email(user_id: str, google_email: str) -> None:
-    """Best-effort display metadata only - never touches tokens, so it's safe to run off the
-    connect flow's critical path (see calendar_oauth_callback)."""
-    if not google_email:
-        return
-    async with db_session.async_session_maker() as db:
-        row = await _row_for_user(db, user_id)
-        if row is not None:
-            row.google_email = google_email
-            await db.commit()
 
 
 async def get_connection_info(user_id: str) -> dict:

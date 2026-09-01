@@ -20,19 +20,43 @@ async def get_personal_workspace(db: AsyncSession, user_id: str) -> Workspace | 
     ).scalar_one_or_none()
 
 
-async def create_personal_workspace(db: AsyncSession, user: User) -> Workspace:
-    existing = await get_personal_workspace(db, user.id)
+async def ensure_personal_workspace(db: AsyncSession, user: User) -> Workspace:
+    """Return the user's internal Personal Space, creating or repairing it if needed.
+
+    Personal features are addressed by the authenticated user, never by a
+    client-supplied workspace id. The workspace row is an internal isolation
+    namespace and must therefore exist for every account. Locking the user row
+    serializes concurrent first-login repairs where row locks are supported.
+    """
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    existing = (
+        await db.execute(
+            select(Workspace).where(
+                Workspace.type == "personal",
+                Workspace.personal_owner_user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
     if existing is not None:
+        if existing.status != "active":
+            existing.status = "active"
+            existing.updated_at = datetime.now(UTC)
+            await db.flush()
         return existing
 
     workspace = Workspace(
         type="personal",
-        name=f"{user.display_name}'s Workspace",
+        name=f"{user.display_name}'s Personal Space",
         personal_owner_user_id=user.id,
     )
     db.add(workspace)
     await db.flush()
     return workspace
+
+
+async def create_personal_workspace(db: AsyncSession, user: User) -> Workspace:
+    """Backward-compatible name for existing provisioning callers."""
+    return await ensure_personal_workspace(db, user)
 
 
 async def create_organization_workspace(db: AsyncSession, name: str, owner_user_id: str) -> Workspace:
@@ -274,6 +298,19 @@ async def list_user_workspaces(db: AsyncSession, user_id: str) -> list[Workspace
     return list(result.scalars().all())
 
 
+async def resolve_personal_workspace_for_user(db: AsyncSession, user_id: str) -> Workspace:
+    """Resolve Personal scope from the authenticated principal only."""
+    workspace = await get_personal_workspace(db, user_id)
+    if workspace is None:
+        # This is an account-provisioning invariant violation, not a value the
+        # client can or should repair by supplying an organization workspace id.
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Personal Space provisioning is incomplete",
+        )
+    return workspace
+
+
 async def resolve_workspace_for_user(
     db: AsyncSession,
     user_id: str,
@@ -300,11 +337,4 @@ async def resolve_workspace_for_user(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace access denied")
         return workspace
 
-    workspaces = await list_user_workspaces(db, user_id)
-    personal = next((workspace for workspace in workspaces if workspace.type == "personal"), None)
-    if personal is None:
-        organization = next((workspace for workspace in workspaces if workspace.type == 'organization'), None)
-        if organization is not None:
-            return organization
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='User has no accessible workspace')
-    return personal
+    return await resolve_personal_workspace_for_user(db, user_id)

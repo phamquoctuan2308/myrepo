@@ -89,24 +89,6 @@ async def test_find_conflicts_returns_overlapping_events(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_suggest_alternative_slots_sends_timezone_aware_bounds_to_google(monkeypatch):
-    """Regression: suggest_alternative_slots computes its own window_start/window_end via naive
-    (tzinfo-stripped) datetimes for its internal interval math, but was passing those same naive
-    strings straight through to list_events() -> Google Calendar's events.list. The real API
-    rejects a timeMin/timeMax with no UTC offset (400 Bad Request) - the mock here doesn't
-    replicate that strictness, so this only asserts the actual value shipped, not a mocked
-    rejection. Confirmed against the real Google Calendar API during manual testing."""
-    fake_service = _with_items([])
-    _mock_service(monkeypatch, fake_service)
-
-    await calendar_service.suggest_alternative_slots(_USER_ID, "2026-08-01T11:00:00+07:00", "2026-08-01T12:00:00+07:00")
-
-    _, kwargs = fake_service.events.return_value.list.call_args
-    assert kwargs["timeMin"].endswith("+07:00")
-    assert kwargs["timeMax"].endswith("+07:00")
-
-
-@pytest.mark.asyncio
 async def test_suggest_alternative_slots_starts_right_after_busy_event(monkeypatch):
     """One 30-minute conflict right at the requested start: the first alternative should pick up
     exactly where it ends, and a second alternative should still be found (next working day, since

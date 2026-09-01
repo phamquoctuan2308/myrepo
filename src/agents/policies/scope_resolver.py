@@ -1,8 +1,3 @@
-"""Agent-workspace scope resolution: turns (user, organization workspace, requested profile/scope)
-into what that user is actually allowed to see. Ported narrowly from the G19-T132-Lương-Trí-Tuệ
-branch's foundation - see docs/MULTI_AGENT_PROGRESS.md. Nothing here is wired into `/chat` yet.
-"""
-
 import hashlib
 
 from pydantic import BaseModel, ConfigDict
@@ -21,6 +16,7 @@ from src.db.models import (
     AgentWorkspaceConversation,
     AgentWorkspaceMembership,
     Conversation,
+    ConversationParticipant,
     User,
     Workspace,
     WorkspaceMembership,
@@ -55,116 +51,54 @@ async def _has_organization_access(db: AsyncSession, user_id: str, workspace_id:
                 WorkspaceMembership.workspace_id == workspace_id,
                 WorkspaceMembership.user_id == user_id,
                 WorkspaceMembership.status == "active",
+                WorkspaceMembership.role.in_(("owner", "admin", "member")),
             )
         )
     ).scalar_one_or_none() is not None
-
-
-class InvalidAttendeeError(ValueError):
-    """Raised by validate_attendee_ids - one or more attendee_ids do not resolve to an active
-    member of the proposing agent's own organization. Callers turn this into a clean
-    ToolResult(status=ERROR) / ActionProposalRejectedError, never let it become a raw 500."""
-
-    def __init__(self, missing_ids: tuple[str, ...]):
-        super().__init__(f"attendee_ids outside this organization: {', '.join(missing_ids)}")
-        self.missing_ids = missing_ids
-
-
-async def validate_attendee_ids(
-    db: AsyncSession,
-    *,
-    organization_workspace_id: str,
-    attendee_ids: tuple[str, ...],
-) -> tuple[str, ...]:
-    """A specialist meeting proposal (propose_delivery_meeting/propose_executive_meeting/the
-    future propose_quality_meeting) must never be able to invite an arbitrary User.id - only an
-    active member of the SAME organization (Company Root boundary, docs/BRIEF.md #6 "server tự
-    xác định... không tin các trường quyền do client gửi") the proposing agent's own context
-    belongs to. Cross-department invites (e.g. a Delivery meeting inviting a QA lead) are
-    legitimate and allowed - the boundary enforced here is the company, not the single
-    AgentWorkspace, matching how a real meeting invite works.
-
-    Returns the attendees' emails in `attendee_ids` order (deduplicated) - never a partial list;
-    raises InvalidAttendeeError if even one id doesn't resolve to an active org member, so the
-    caller can reject the whole proposal rather than silently drop invalid invitees."""
-    if not attendee_ids:
-        return ()
-    rows = (
-        await db.execute(
-            select(User.id, User.email)
-            .join(WorkspaceMembership, WorkspaceMembership.user_id == User.id)
-            .where(
-                WorkspaceMembership.workspace_id == organization_workspace_id,
-                WorkspaceMembership.status == "active",
-                User.id.in_(attendee_ids),
-                User.is_active.is_(True),
-            )
-        )
-    ).all()
-    emails_by_id = {row.id: row.email for row in rows}
-    missing = tuple(attendee_id for attendee_id in attendee_ids if attendee_id not in emails_by_id)
-    if missing:
-        raise InvalidAttendeeError(missing)
-    return tuple(emails_by_id[attendee_id] for attendee_id in dict.fromkeys(attendee_ids))
-
-
-async def list_active_agent_workspace_memberships(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    organization_workspace_id: str | None = None,
-    business_roles: tuple[str, ...] | None = None,
-) -> tuple[AgentWorkspace, ...]:
-    """Every active AgentWorkspace the user has an active membership in.
-
-    Shared by the EXECUTIVE branch of resolve_agent_scope below (organization- and
-    executive_viewer-scoped) and by the self-service "my agent workspaces" listing (unscoped,
-    any active role) - one query, two callers, so the membership-filtering logic lives in exactly
-    one place.
-    """
-    stmt = (
-        select(AgentWorkspace)
-        .join(AgentWorkspaceMembership, AgentWorkspaceMembership.agent_workspace_id == AgentWorkspace.id)
-        .where(
-            AgentWorkspace.status == "active",
-            AgentWorkspaceMembership.user_id == user_id,
-            AgentWorkspaceMembership.status == "active",
-        )
-        .order_by(AgentWorkspace.key.asc())
-    )
-    if organization_workspace_id is not None:
-        stmt = stmt.where(AgentWorkspace.organization_workspace_id == organization_workspace_id)
-    if business_roles is not None:
-        stmt = stmt.where(AgentWorkspaceMembership.business_role.in_(business_roles))
-    return tuple((await db.execute(stmt)).scalars().all())
-
-
-async def list_my_agent_workspaces(db: AsyncSession, *, user_id: str) -> tuple[AgentWorkspace, ...]:
-    """Agent workspaces the user has ANY active membership in (member/lead/executive_viewer),
-    across every organization workspace - backs GET /api/v1/agent-workspaces?mine=true."""
-    return await list_active_agent_workspace_memberships(db, user_id=user_id)
 
 
 async def _resolve_conversation_resources(
     db: AsyncSession,
     organization_workspace_id: str,
     agent_workspace_id: str,
+    expected_classification: str,
+    participant_user_id: str | None = None,
 ) -> tuple[tuple[str, ...], str | None]:
-    rows = (
-        await db.execute(
-            select(Conversation.id, Conversation.ai_policy_version)
-            .join(
-                AgentWorkspaceConversation,
-                AgentWorkspaceConversation.conversation_id == Conversation.id,
-            )
-            .where(
-                AgentWorkspaceConversation.agent_workspace_id == agent_workspace_id,
-                Conversation.workspace_id == organization_workspace_id,
-                Conversation.type == "group",
-                Conversation.ai_enabled.is_(True),
-            )
-            .order_by(Conversation.id.asc())
+    """Resolve live, AI-enabled group sources for one Delivery/Quality workspace.
+
+    A lead receives the workspace's resolved group allowlist. A member receives
+    only its intersection with active conversation participation. This makes
+    membership in an Agent Workspace insufficient on its own to read another
+    group's data, and keeps the router's capability envelope aligned with the
+    Role B Delivery policy.
+    """
+
+    statement = (
+        select(Conversation.id, Conversation.ai_policy_version)
+        .join(
+            AgentWorkspaceConversation,
+            AgentWorkspaceConversation.conversation_id == Conversation.id,
         )
+        .where(
+            AgentWorkspaceConversation.agent_workspace_id == agent_workspace_id,
+            AgentWorkspaceConversation.classification == expected_classification,
+            Conversation.workspace_id == organization_workspace_id,
+            Conversation.type == "group",
+            Conversation.ai_enabled.is_(True),
+        )
+        .order_by(Conversation.id.asc())
+    )
+    if participant_user_id is not None:
+        statement = statement.join(
+            ConversationParticipant,
+            ConversationParticipant.conversation_id == Conversation.id,
+        ).where(
+            ConversationParticipant.user_id == participant_user_id,
+            ConversationParticipant.revoked_at.is_(None),
+            ConversationParticipant.hidden_at.is_(None),
+        )
+    rows = (
+        await db.execute(statement)
     ).all()
     if not rows:
         return (), None
@@ -189,36 +123,50 @@ async def resolve_agent_scope(
     if agent_profile == AgentProfile.EXECUTIVE:
         if requested_scope != RequestedScope.AGGREGATE or target_agent_workspace_id is not None:
             return _denied(PolicyReason.INVALID_SCOPE)
-        allowed = await list_active_agent_workspace_memberships(
-            db,
-            user_id=user_id,
-            organization_workspace_id=organization_workspace_id,
-            business_roles=("executive_viewer",),
-        )
-        if not allowed:
-            return _denied(PolicyReason.NOT_MEMBER)
-        # `allowed` only proves active *membership* (status=="active"); a member can still have
-        # opted their own AI access out separately (consent_status) without leaving the workspace.
-        # If the executive_viewer has consented in at least one, aggregate over those; a total
-        # revoke across every executive_viewer membership is reported distinctly from NOT_MEMBER.
-        consented_ids = (
+        executive_membership = (
             await db.execute(
-                select(AgentWorkspaceMembership.agent_workspace_id).where(
-                    AgentWorkspaceMembership.agent_workspace_id.in_([w.id for w in allowed]),
+                select(AgentWorkspaceMembership.id)
+                .join(
+                    AgentWorkspace,
+                    AgentWorkspace.id == AgentWorkspaceMembership.agent_workspace_id,
+                )
+                .where(
+                    AgentWorkspace.organization_workspace_id == organization_workspace_id,
+                    AgentWorkspace.agent_profile == AgentProfile.EXECUTIVE.value,
+                    AgentWorkspace.status == "active",
                     AgentWorkspaceMembership.user_id == user_id,
+                    AgentWorkspaceMembership.business_role.in_(("lead", "member", "executive_viewer")),
                     AgentWorkspaceMembership.status == "active",
-                    AgentWorkspaceMembership.consent_status == "active",
                 )
             )
-        ).scalars().all()
-        if not consented_ids:
-            return _denied(PolicyReason.WORKSPACE_CONSENT_REVOKED)
-        allowed = tuple(w for w in allowed if w.id in set(consented_ids))
+        ).scalar_one_or_none()
+        if executive_membership is None:
+            return _denied(PolicyReason.NOT_MEMBER)
+        allowed_ids = tuple(
+            (
+                await db.execute(
+                    select(AgentWorkspace.id)
+                    .where(
+                        AgentWorkspace.organization_workspace_id == organization_workspace_id,
+                        AgentWorkspace.status == "active",
+                        AgentWorkspace.agent_profile.in_(
+                            (
+                                AgentProfile.PRODUCT_DELIVERY.value,
+                                AgentProfile.QUALITY_ASSURANCE.value,
+                            )
+                        ),
+                    )
+                    .order_by(AgentWorkspace.key.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
         return ResolvedAgentScope(
             decision=PolicyDecision.ALLOW,
             reason=PolicyReason.ALLOWED,
             business_role=BusinessRole.EXECUTIVE,
-            allowed_agent_workspace_ids=tuple(workspace.id for workspace in allowed),
+            allowed_agent_workspace_ids=allowed_ids,
         )
 
     if agent_profile not in {AgentProfile.PRODUCT_DELIVERY, AgentProfile.QUALITY_ASSURANCE}:
@@ -248,13 +196,16 @@ async def resolve_agent_scope(
     ).scalar_one_or_none()
     if membership is None:
         return _denied(PolicyReason.NOT_MEMBER)
-    if membership.consent_status != "active":
-        return _denied(PolicyReason.WORKSPACE_CONSENT_REVOKED)
     role = BusinessRole.LEAD if membership.business_role == "lead" else BusinessRole.MEMBER
+    expected_classification = (
+        "delivery" if agent_profile == AgentProfile.PRODUCT_DELIVERY else "quality"
+    )
     allowed_resource_ids, consent_scope_hash = await _resolve_conversation_resources(
         db,
         organization_workspace_id,
         agent_workspace.id,
+        expected_classification,
+        participant_user_id=user_id if role == BusinessRole.MEMBER else None,
     )
     return ResolvedAgentScope(
         decision=PolicyDecision.ALLOW,

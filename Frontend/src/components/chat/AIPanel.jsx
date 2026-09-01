@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAuth } from '../../context/AuthContext'
 import { chatWithAgent, resumeAgent } from '../../api/agent'
@@ -36,8 +36,6 @@ function parseJsonArray(text) {
 
 function describeInterrupt(interrupt) {
   const d = interrupt.draft
-  if (interrupt.type === 'memory_write') return `Ghi nhớ "${d.title}" cho các phiên sau?`
-  if (interrupt.type === 'memory_delete') return `Quên memory "${d.title}"?`
   if (interrupt.type === 'reminder') return `Tạo nhắc nhở "${d.title}" lúc ${d.due_at}?`
   if (interrupt.type === 'calendar_event') return `Tạo sự kiện "${d.summary}" từ ${d.start} đến ${d.end}?`
   if (interrupt.type === 'calendar_event_update') return `Cập nhật sự kiện ${d.event_id}?`
@@ -62,29 +60,14 @@ export default function AIPanel({
   const [result, setResult] = useState('')
   const [error, setError] = useState('')
   const [pending, setPending] = useState(null)
-  const [question, setQuestion] = useState('')
-  const [asking, setAsking] = useState(false)
-  // Ask Orbit is a real multi-turn thread. Keep it while this panel stays on the same human
-  // conversation, reset it when the user switches conversations.
-  const [threadId, setThreadId] = useState(null)
-  const activeConversationRef = useRef(conversationId)
-  activeConversationRef.current = conversationId
-  const isCurrentConversation = (id) => activeConversationRef.current === id
-  useEffect(() => {
-    setThreadId(null); setPending(null); setResult(''); setError(''); setQuestion('')
-    setRunningAction(null); setAsking(false)
-  }, [conversationId])
 
   const isCustomRangeIncomplete = scope === 'Custom time range' && !customSince && !customUntil
 
   // Permission itself lives in ChatPage (shared with the header badge) - this just calls up and
   // surfaces a failure locally, same as every other action in this panel.
   const toggleGrant = async (next) => {
-    const requestConversationId = conversationId
     try { await onToggleGrant(next) }
-    catch (err) {
-      if (isCurrentConversation(requestConversationId)) setError(err.detail || 'Could not update AI permission.')
-    }
+    catch (err) { setError(err.detail || 'Could not update AI permission.') }
   }
 
   const buildScope = () => {
@@ -100,7 +83,6 @@ export default function AIPanel({
   // Shared by every quick action / Ask Orbit: a tool call needing confirmation (reminder,
   // calendar create/update/delete) comes back as status "interrupted" instead of a plain answer.
   const handleAgentResult = (res) => {
-    if (res.thread_id) setThreadId(res.thread_id)
     if (res.status === 'error') { setError(res.response || 'The AI agent hit an error.'); return true }
     if (res.status === 'interrupted') {
       setPending({ thread_id: res.thread_id, interrupt: res.interrupt })
@@ -112,107 +94,72 @@ export default function AIPanel({
 
   const respondToInterrupt = async (approved) => {
     if (!pending || runningAction) return
-    const requestConversationId = conversationId
     setRunningAction('__resume__'); setError('')
     try {
       const res = await resumeAgent(token, { thread_id: pending.thread_id, approved })
-      if (!isCurrentConversation(requestConversationId)) return
       setPending(null)
       if (!handleAgentResult(res)) { setResultTitle(approved ? 'Done' : 'Cancelled'); setResult(res.response) }
-    } catch (err) {
-      if (isCurrentConversation(requestConversationId)) setError(err.detail || 'Could not reach the AI agent.')
-    } finally {
-      if (isCurrentConversation(requestConversationId)) setRunningAction(null)
-    }
+    } catch (err) { setError(err.detail || 'Could not reach the AI agent.') }
+    finally { setRunningAction(null) }
   }
 
   const runSummarize = async () => {
     if (!messages.length) { setError('No messages in this conversation yet.'); setResult(''); return }
-    const requestConversationId = conversationId
     setRunningAction('Summarize'); setError(''); setResult(''); setPending(null)
     try {
-      const res = await chatWithAgent(token, {
-        message: 'Summarize this conversation.', scope: buildScope(), conversation_id: conversationId,
-        quick_action: 'summarize',
-      })
-      if (!isCurrentConversation(requestConversationId)) return
+      const res = await chatWithAgent(token, { message: 'Summarize this conversation.', scope: buildScope(), conversation_id: conversationId })
       if (handleAgentResult(res)) return
       setResultTitle('Summary'); setResult(res.response)
-    } catch (err) {
-      if (isCurrentConversation(requestConversationId)) setError(err.detail || 'Could not summarize this conversation.')
-    } finally {
-      if (isCurrentConversation(requestConversationId)) setRunningAction(null)
-    }
+    } catch (err) { setError(err.detail || 'Could not summarize this conversation.') }
+    finally { setRunningAction(null) }
   }
 
   const runExtractTasks = async () => {
     if (!messages.length) { setError('No messages in this conversation yet.'); setResult(''); return }
-    const requestConversationId = conversationId
     setRunningAction('Extract tasks'); setError(''); setResult(''); setPending(null)
     try {
-      const res = await chatWithAgent(token, {
-        message: 'Extract tasks from this conversation.', scope: buildScope(), conversation_id: conversationId,
-        quick_action: 'extract_tasks',
-      })
-      if (!isCurrentConversation(requestConversationId)) return
+      const res = await chatWithAgent(token, { message: 'Extract tasks from this conversation.', scope: buildScope(), conversation_id: conversationId })
       if (handleAgentResult(res)) return
       const items = parseJsonArray(res.response)
       // source: 'proactive' (not 'manual') even though a person clicked the button - these titles
       // came from the LLM reading the conversation, same provenance as the background detector, so
-      // they get the same treatment: Accept in Tasks auto-creates the matching Calendar event when
-      // due_at is set (task_routes.py::_sync_task_to_calendar gates on source in
-      // {"proactive", "ai_extracted"}). No Reminder side effect - that still needs its own
-      // confirmation, see the P0 AI consent/action-safety boundary in ROADMAP.md.
+      // they get the same treatment: Accept in Tasks auto-creates the Calendar event + Reminder
+      // (task_routes.py::_add_to_calendar_and_reminder gates on source == "proactive").
       const settled = await Promise.allSettled(items.map(item => createTask(token, {
         title: item.title, due_at: item.due_at || null, priority: item.priority || 'Medium',
         conversation_id: conversationId, source: 'proactive',
       })))
-      if (!isCurrentConversation(requestConversationId)) return
       const added = settled.filter(r => r.status === 'fulfilled').length
       setResultTitle('Tasks extracted')
       setResult(added ? `Added ${added} task${added > 1 ? 's' : ''} to your Tasks inbox for review.` : 'No action items found in this conversation.')
-    } catch (err) {
-      if (isCurrentConversation(requestConversationId)) setError(err.detail || 'Could not extract tasks from this conversation.')
-    } finally {
-      if (isCurrentConversation(requestConversationId)) setRunningAction(null)
-    }
+    } catch (err) { setError(err.detail || 'Could not extract tasks from this conversation.') }
+    finally { setRunningAction(null) }
   }
 
   const runFindSchedule = async () => {
     if (!messages.length) { setError('No messages in this conversation yet.'); setResult(''); return }
-    const requestConversationId = conversationId
     setRunningAction('Find schedule'); setError(''); setResult(''); setPending(null)
     try {
       const res = await chatWithAgent(token, { message: 'List any events, meetings, or scheduled times mentioned in this conversation.', scope: buildScope(), conversation_id: conversationId })
-      if (!isCurrentConversation(requestConversationId)) return
       if (handleAgentResult(res)) return
       setResultTitle('Schedule found'); setResult(res.response)
-    } catch (err) {
-      if (isCurrentConversation(requestConversationId)) setError(err.detail || 'Could not find schedule in this conversation.')
-    } finally {
-      if (isCurrentConversation(requestConversationId)) setRunningAction(null)
-    }
+    } catch (err) { setError(err.detail || 'Could not find schedule in this conversation.') }
+    finally { setRunningAction(null) }
   }
 
   const runDeadlines = async () => {
     if (!messages.length) { setError('No messages in this conversation yet.'); setResult(''); return }
-    const requestConversationId = conversationId
     setRunningAction('Deadlines'); setError(''); setResult(''); setPending(null)
     try {
       const res = await chatWithAgent(token, { message: 'List any deadlines or due dates mentioned in this conversation.', scope: buildScope(), conversation_id: conversationId })
-      if (!isCurrentConversation(requestConversationId)) return
       if (handleAgentResult(res)) return
       setResultTitle('Deadlines found'); setResult(res.response)
-    } catch (err) {
-      if (isCurrentConversation(requestConversationId)) setError(err.detail || 'Could not find deadlines in this conversation.')
-    } finally {
-      if (isCurrentConversation(requestConversationId)) setRunningAction(null)
-    }
+    } catch (err) { setError(err.detail || 'Could not find deadlines in this conversation.') }
+    finally { setRunningAction(null) }
   }
 
   const runSuggestReminder = async () => {
     if (!messages.length) { setError('No messages in this conversation yet.'); setResult(''); return }
-    const requestConversationId = conversationId
     setRunningAction('Suggest reminder'); setError(''); setResult(''); setPending(null)
     try {
       const res = await chatWithAgent(token, {
@@ -220,33 +167,25 @@ export default function AIPanel({
         scope: buildScope(),
         conversation_id: conversationId,
       })
-      if (!isCurrentConversation(requestConversationId)) return
       if (handleAgentResult(res)) return
       setResultTitle('Suggest reminder'); setResult(res.response || 'No deadline or appointment found to remind about.')
-    } catch (err) {
-      if (isCurrentConversation(requestConversationId)) setError(err.detail || 'Could not draft a reminder from this conversation.')
-    } finally {
-      if (isCurrentConversation(requestConversationId)) setRunningAction(null)
-    }
+    } catch (err) { setError(err.detail || 'Could not draft a reminder from this conversation.') }
+    finally { setRunningAction(null) }
   }
+
+  const [question, setQuestion] = useState('')
+  const [asking, setAsking] = useState(false)
 
   const askOrbit = async (q = question) => {
     if (!q.trim() || asking) return
-    const requestConversationId = conversationId
     setAsking(true); setError(''); setResult(''); setPending(null)
     try {
-      const res = await chatWithAgent(token, {
-        message: q, scope: buildScope(), conversation_id: conversationId, thread_id: threadId,
-      })
-      if (!isCurrentConversation(requestConversationId)) return
+      const res = await chatWithAgent(token, { message: q, scope: buildScope(), conversation_id: conversationId })
       if (handleAgentResult(res)) return
       setResultTitle('Orbit says'); setResult(res.response)
       setQuestion('')
-    } catch (err) {
-      if (isCurrentConversation(requestConversationId)) setError(err.detail || 'Could not reach the AI agent.')
-    } finally {
-      if (isCurrentConversation(requestConversationId)) setAsking(false)
-    }
+    } catch (err) { setError(err.detail || 'Could not reach the AI agent.') }
+    finally { setAsking(false) }
   }
 
   const handlers = {

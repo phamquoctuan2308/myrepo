@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from langchain_core.messages import AIMessage
 
@@ -21,6 +23,8 @@ async def test_fresh_chat_creates_assistant_thread(client, auth_headers, monkeyp
         headers=auth_headers,
     )
     assert resp.status_code == 200
+    assert resp.json()["analysis"]
+    assert len(resp.json()["analysis_steps"]) >= 2
     thread_id = resp.json()["thread_id"]
 
     listing = await client.get("/api/v1/assistant/threads", headers=auth_headers)
@@ -113,14 +117,18 @@ async def test_thread_messages_returns_history_and_checks_ownership(
     client, auth_headers, other_auth_headers, monkeypatch, fake_llm_factory
 ):
     _mock_reply(monkeypatch, fake_llm_factory, "Câu trả lời thật.")
-    resp = await client.post("/api/v1/chat", json={"message": "Câu hỏi thật"}, headers=auth_headers)
+    user_message = "Hãy giúp tôi lập kế hoạch công việc hôm nay."
+    resp = await client.post("/api/v1/chat", json={"message": user_message}, headers=auth_headers)
     thread_id = resp.json()["thread_id"]
 
     history = await client.get(f"/api/v1/assistant/threads/{thread_id}/messages", headers=auth_headers)
     assert history.status_code == 200
     messages = history.json()
-    assert {"role": "user", "content": "Câu hỏi thật"} in messages
-    assert {"role": "assistant", "content": "Câu trả lời thật."} in messages
+    assert any(message["role"] == "user" and message["content"] == user_message for message in messages)
+    assistant = next(message for message in messages if message["role"] == "assistant")
+    assert assistant["content"] == "Câu trả lời thật."
+    assert assistant["analysis"]
+    assert len(assistant["analysis_steps"]) >= 2
 
     forbidden = await client.get(f"/api/v1/assistant/threads/{thread_id}/messages", headers=other_auth_headers)
     assert forbidden.status_code == 404
@@ -139,3 +147,106 @@ async def test_touch_if_exists_never_creates_a_row(client):
         )
         threads = await assistant_thread_service.list_threads(db, owner_id="whoever")
     assert threads == []
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_removes_metadata_and_checkpoint_history(
+    client, auth_headers, monkeypatch, fake_llm_factory
+):
+    _mock_reply(monkeypatch, fake_llm_factory, "Phản hồi cũ.")
+    created = await client.post(
+        "/api/v1/chat", json={"message": "Nội dung cũ cần xóa"}, headers=auth_headers
+    )
+    thread_id = created.json()["thread_id"]
+
+    deleted = await client.delete(f"/api/v1/assistant/threads/{thread_id}", headers=auth_headers)
+    assert deleted.status_code == 204
+    assert (await client.get("/api/v1/assistant/threads", headers=auth_headers)).json() == []
+    assert (
+        await client.get(f"/api/v1/assistant/threads/{thread_id}/messages", headers=auth_headers)
+    ).status_code == 404
+
+    # Reusing the opaque client thread id must start clean; deleting only the sidebar metadata
+    # would incorrectly replay the old LangGraph checkpoint here.
+    _mock_reply(monkeypatch, fake_llm_factory, "Phản hồi mới.")
+    recreated = await client.post(
+        "/api/v1/chat",
+        json={"message": "Nội dung mới", "thread_id": thread_id},
+        headers=auth_headers,
+    )
+    assert recreated.status_code == 200
+    history = (
+        await client.get(f"/api/v1/assistant/threads/{thread_id}/messages", headers=auth_headers)
+    ).json()
+    contents = [message["content"] for message in history]
+    assert "Nội dung mới" in contents
+    assert "Nội dung cũ cần xóa" not in contents
+    assert "Phản hồi cũ." not in contents
+
+
+@pytest.mark.asyncio
+async def test_delete_thread_hides_ownership_and_preserves_other_users_data(
+    client, auth_headers, other_auth_headers, monkeypatch, fake_llm_factory
+):
+    _mock_reply(monkeypatch, fake_llm_factory, "Chỉ chủ sở hữu được xóa.")
+    created = await client.post(
+        "/api/v1/chat", json={"message": "Cuộc trò chuyện riêng"}, headers=auth_headers
+    )
+    thread_id = created.json()["thread_id"]
+
+    forbidden = await client.delete(
+        f"/api/v1/assistant/threads/{thread_id}", headers=other_auth_headers
+    )
+    assert forbidden.status_code == 404
+    mine = (await client.get("/api/v1/assistant/threads", headers=auth_headers)).json()
+    assert [thread["thread_id"] for thread in mine] == [thread_id]
+
+    missing = await client.delete(
+        "/api/v1/assistant/threads/does-not-exist", headers=auth_headers
+    )
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_pending_interrupt_is_restored_and_checks_ownership(
+    client, auth_headers, other_auth_headers, monkeypatch
+):
+    owner = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()
+    thread_id = "personal-pending-calendar-test"
+    async with db_session.async_session_maker() as db:
+        await assistant_thread_service.touch_new_or_existing(
+            db,
+            thread_id=thread_id,
+            owner_id=owner["id"],
+            user_message="Đặt lịch họp ngày mai",
+            ai_preview="Đang chờ xác nhận",
+        )
+
+    payload = {
+        "type": "calendar_event",
+        "draft": {
+            "summary": "[E2E] Daily sync",
+            "start": "2026-09-01T10:00:00+07:00",
+            "end": "2026-09-01T10:30:00+07:00",
+        },
+    }
+
+    class FakeAgent:
+        async def aget_state(self, config):
+            assert config["configurable"]["thread_id"] == f'{owner["id"]}:{thread_id}'
+            interrupt = SimpleNamespace(value=payload)
+            task = SimpleNamespace(interrupts=(interrupt,))
+            return SimpleNamespace(tasks=(task,))
+
+    monkeypatch.setattr(assistant_thread_service.agent_graph, "agent", FakeAgent())
+
+    restored = await client.get(
+        f"/api/v1/assistant/threads/{thread_id}/pending", headers=auth_headers
+    )
+    assert restored.status_code == 200
+    assert restored.json() == payload
+
+    forbidden = await client.get(
+        f"/api/v1/assistant/threads/{thread_id}/pending", headers=other_auth_headers
+    )
+    assert forbidden.status_code == 404

@@ -197,8 +197,8 @@ async def test_confirm_event_candidate_requires_manager_and_writes_calendar_only
             conversation_id=conversation_id,
             operation="create",
             title="Họp dự án",
-            start_at=datetime.fromisoformat("2026-08-20T09:00:00+07:00"),
-            end_at=datetime.fromisoformat("2026-08-20T10:00:00+07:00"),
+            start_at=datetime.fromisoformat("2099-08-20T09:00:00+07:00"),
+            end_at=datetime.fromisoformat("2099-08-20T10:00:00+07:00"),
             confidence=0.95,
             source_message_ids=[message.id],
             authorization_scope_hash=scope_hash,
@@ -211,8 +211,8 @@ async def test_confirm_event_candidate_requires_manager_and_writes_calendar_only
     monkeypatch.setattr(calendar_service, "authorize_calendar_access", AsyncMock())
     monkeypatch.setattr(calendar_service, "create_event", lambda *args: {
         "id": "google-1", "summary": "Họp dự án",
-        "start": {"dateTime": "2026-08-20T09:00:00+07:00"},
-        "end": {"dateTime": "2026-08-20T10:00:00+07:00"},
+        "start": {"dateTime": "2099-08-20T09:00:00+07:00"},
+        "end": {"dateTime": "2099-08-20T10:00:00+07:00"},
     })
     monkeypatch.setattr(calendar_service, "broadcast_change", create)
 
@@ -221,12 +221,19 @@ async def test_confirm_event_candidate_requires_manager_and_writes_calendar_only
     )
     assert denied.status_code == 403
     confirmed = await client.post(
-        f"/api/v1/calendar/candidates/{candidate.id}/confirm", headers=auth_headers
+        f"/api/v1/calendar/candidates/{candidate.id}/confirm",
+        json={"create_reminder": True, "reminder_lead_minutes": 60},
+        headers=auth_headers,
     )
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "confirmed"
     assert confirmed.json()["calendar_event_id"] == "google-1"
     assert confirmed.json()["calendar_owner_user_id"] == manager["id"]
+    reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+    linked = next(item for item in reminders if item["calendar_event_id"] == "google-1")
+    assert linked["source"] == "proactive"
+    assert linked["lead_minutes"] == 60
+    assert linked["fire_at"].startswith("2099-08-20T08:00:00")
 
 
 @pytest.mark.asyncio

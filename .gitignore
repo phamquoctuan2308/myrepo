@@ -31,6 +31,7 @@ Thumbs.db
 # Data (never commit large data)
 data/
 *.db
+*.dump
 
 # Google OAuth credentials/tokens
 secrets/
@@ -45,9 +46,6 @@ logs/
 htmlcov/
 .coverage
 coverage.xml
-eval/results/*.junit.xml
-
-# Local task/test scratch space
 .tmp/
 
 # Docker

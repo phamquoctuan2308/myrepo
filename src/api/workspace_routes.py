@@ -20,6 +20,7 @@ from src.services.authorization_service import (
     require_workspace_role,
     revoke_support_access,
 )
+from src.services.company_service import ensure_open_test_chat_membership
 from src.services.workspace_service import (
     add_workspace_member_by_email,
     create_organization_workspace,
@@ -53,6 +54,10 @@ async def list_workspaces(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[WorkspaceOut]:
+    # Also upgrades already-signed-in accounts when public test chat is enabled;
+    # they do not need to log out and back in after the deployment.
+    if await ensure_open_test_chat_membership(db, current_user) is not None:
+        await db.commit()
     workspaces = await list_user_workspaces(db, current_user.id)
     outputs: list[WorkspaceOut] = []
     for workspace in workspaces:

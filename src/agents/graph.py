@@ -2,12 +2,20 @@ from langchain_core.messages import ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
-from psycopg_pool import AsyncConnectionPool
 
 from src.agents.nodes.compact_node import compact_thread_node
-from src.agents.nodes.context_node import context_node
 from src.agents.nodes.guardrail_node import input_guardrail_node, output_guardrail_node
+from src.agents.nodes.personal_clarification_node import personal_clarification_node
+from src.agents.nodes.personal_memory_response_node import personal_memory_response_node
+from src.agents.nodes.personal_plan_node import personal_plan_node, tool_budget_exhausted_node
+from src.agents.nodes.personal_query_router_node import (
+    personal_capability_response_node,
+    personal_query_router_node,
+    save_explicit_personal_memory_node,
+)
+from src.agents.nodes.personal_response_quality_node import personal_response_quality_node
 from src.agents.nodes.planner_node import planner_node
+from src.agents.nodes.process_summary_node import attach_process_summary_node
 from src.agents.state import AgentState
 from src.agents.tools import ALL_TOOLS
 from src.config import get_settings
@@ -17,19 +25,39 @@ from src.config import get_settings
 # pass, which some models handle poorly (observed: hallucinating a bogus repeat tool-call instead
 # of plain text). Calendar/reminder tools still go back through planner - their raw output isn't
 # user-facing prose, and human-in-the-loop confirmation flows need that turn.
-TERMINAL_TOOLS = {"summarize_conversation", "extract_tasks"}
+TERMINAL_TOOLS = {"summarize_conversation", "extract_tasks", "save_personal_memory"}
 
 
 def route_after_planner(state: AgentState) -> str:
     """Route tool calls to execution and plain replies through output validation."""
     if state.get("error"):
         return END
-    return "tools" if tools_condition(state) == "tools" else "output_guardrail"
+    return tools_condition(state)
 
 
 def route_after_input_guardrail(state: AgentState) -> str:
-    """A blocked request ends without spending tokens or exposing it to the planner."""
-    return END if state.get("guardrail_blocked") or state.get("guardrail_requires_clarification") else "context_builder"
+    """Stop blocked/unclear requests before they can consume LLM tokens or call a tool."""
+    if state.get("guardrail_blocked") or state.get("guardrail_requires_clarification"):
+        return "process_summary"
+    return "personal_query_router"
+
+
+def route_after_personal_query_router(state: AgentState) -> str:
+    """Handle deterministic intents directly; plan the remaining allowed requests."""
+    if state.get("personal_intent") == "capability_help":
+        return "personal_capability_response"
+    if state.get("personal_intent") == "memory_write":
+        return "save_personal_memory"
+    return "personal_plan"
+
+
+def route_after_memory_save(state: AgentState) -> str:
+    memory_write = state.get("metadata", {}).get("memory_write") or {}
+    return "personal_memory_response" if memory_write.get("saved") else "output_guardrail"
+
+
+def route_after_personal_plan(state: AgentState) -> str:
+    return "personal_clarification" if state.get("action_requires_clarification") else "planner"
 
 
 def route_after_tools(state: AgentState) -> str:
@@ -37,7 +65,17 @@ def route_after_tools(state: AgentState) -> str:
     back to the planner so it can phrase a reply or decide on further tool calls."""
     last = state["messages"][-1]
     if isinstance(last, ToolMessage) and last.name in TERMINAL_TOOLS:
-        return "output_guardrail"
+        return END
+    latest_human = next(
+        (index for index in range(len(state["messages"]) - 1, -1, -1) if state["messages"][index].type == "human"),
+        0,
+    )
+    tool_count = sum(
+        isinstance(message, ToolMessage) for message in state["messages"][latest_human:]
+    )
+    max_calls = int(state.get("personal_plan", {}).get("max_tool_calls", 8))
+    if tool_count >= max_calls:
+        return "tool_budget_exhausted"
     return "planner"
 
 
@@ -45,26 +83,69 @@ def build_graph(checkpointer):
     graph = StateGraph(AgentState)
 
     graph.add_node("input_guardrail", input_guardrail_node)
-    graph.add_node("context_builder", context_node)
+    graph.add_node("personal_query_router", personal_query_router_node)
+    graph.add_node("personal_capability_response", personal_capability_response_node)
+    graph.add_node("save_personal_memory", save_explicit_personal_memory_node)
+    graph.add_node("personal_memory_response", personal_memory_response_node)
+    graph.add_node("personal_plan", personal_plan_node)
+    graph.add_node("personal_clarification", personal_clarification_node)
     graph.add_node("planner", planner_node)
+    graph.add_node("personal_response_quality", personal_response_quality_node)
     graph.add_node("tools", ToolNode(ALL_TOOLS))
     graph.add_node("output_guardrail", output_guardrail_node)
+    graph.add_node("process_summary", attach_process_summary_node)
+    graph.add_node("tool_budget_exhausted", tool_budget_exhausted_node)
     graph.add_node("compact_thread", compact_thread_node)
 
     graph.set_entry_point("input_guardrail")
     graph.add_conditional_edges(
-        "input_guardrail", route_after_input_guardrail, {"context_builder": "context_builder", END: END}
+        "input_guardrail",
+        route_after_input_guardrail,
+        {"personal_query_router": "personal_query_router", "process_summary": "process_summary"},
     )
-    graph.add_edge("context_builder", "planner")
+    graph.add_conditional_edges(
+        "personal_query_router",
+        route_after_personal_query_router,
+        {
+            "personal_capability_response": "personal_capability_response",
+            "save_personal_memory": "save_personal_memory",
+            "personal_plan": "personal_plan",
+        },
+    )
+    graph.add_edge("personal_capability_response", "output_guardrail")
+    graph.add_conditional_edges(
+        "personal_plan",
+        route_after_personal_plan,
+        {"personal_clarification": "personal_clarification", "planner": "planner"},
+    )
+    graph.add_edge("personal_clarification", "process_summary")
+    graph.add_conditional_edges(
+        "save_personal_memory",
+        route_after_memory_save,
+        {
+            "personal_memory_response": "personal_memory_response",
+            "output_guardrail": "output_guardrail",
+        },
+    )
+    graph.add_edge("personal_memory_response", "output_guardrail")
     graph.add_conditional_edges(
         "planner",
         route_after_planner,
-        {"tools": "tools", "output_guardrail": "output_guardrail", END: END},
+        {"tools": "tools", END: "personal_response_quality"},
     )
+    graph.add_edge("personal_response_quality", "output_guardrail")
     graph.add_conditional_edges(
-        "tools", route_after_tools, {"planner": "planner", "output_guardrail": "output_guardrail"}
+        "tools",
+        route_after_tools,
+        {
+            "planner": "planner",
+            "tool_budget_exhausted": "tool_budget_exhausted",
+            END: "output_guardrail",
+        },
     )
-    graph.add_edge("output_guardrail", "compact_thread")
+    graph.add_edge("tool_budget_exhausted", "output_guardrail")
+    graph.add_edge("output_guardrail", "process_summary")
+    graph.add_edge("process_summary", "compact_thread")
     graph.add_edge("compact_thread", END)
 
     return graph.compile(checkpointer=checkpointer)
@@ -73,14 +154,8 @@ def build_graph(checkpointer):
 _settings = get_settings()
 _use_postgres = _settings.database_url.startswith(("postgresql://", "postgresql+asyncpg://", "postgres://"))
 
-# `AsyncPostgresSaver` must be constructed inside a *running* event loop (it calls
-# asyncio.get_running_loop() in __init__), which isn't available yet at module-import time -
-# so it's built later, from init_checkpointer() during FastAPI's lifespan. `agent` stays None
-# until then; no /chat call can succeed before init_checkpointer() has been awaited once.
-#
-# Lightweight development/tests (DATABASE_URL not Postgres - see tests/conftest.py) use MemorySaver
-# instead: importing the graph then never requires a running event loop or an external database,
-# and `agent` is ready immediately, no init_checkpointer() call needed.
+# PostgreSQL is initialized during application startup. Lightweight development and tests use
+# MemorySaver so importing the graph never requires a running event loop or external database.
 if _use_postgres:
     checkpointer, checkpointer_pool, agent = None, None, None
 else:
@@ -96,15 +171,16 @@ async def init_checkpointer() -> None:
         return
 
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from psycopg_pool import AsyncConnectionPool
 
     scheme, _, rest = _settings.database_url.partition("://")
     conninfo = f"{scheme.split('+')[0]}://{rest}"
-    # Small on purpose - see src/config.py's db_pool_size comment: this pool shares Supabase's
-    # 15-connection session-pooler ceiling with the SQLAlchemy engine, and two Render instances
-    # briefly overlap on every deploy, so this can't be sized as if it had the ceiling to itself.
-    # min_size must be passed explicitly - psycopg_pool defaults it to 4, which is > max_size=2.
     pool = AsyncConnectionPool(
-        conninfo=conninfo, min_size=1, max_size=2, open=False, kwargs={"autocommit": True}
+        conninfo=conninfo,
+        min_size=1,
+        max_size=_settings.agent_checkpointer_pool_size,
+        open=False,
+        kwargs={"autocommit": True},
     )
     await pool.open()
     saver = AsyncPostgresSaver(pool)

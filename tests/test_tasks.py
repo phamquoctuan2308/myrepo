@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
@@ -7,8 +7,15 @@ from sqlalchemy import select
 
 from src.config import get_settings
 from src.db import session as db_session
-from src.db.models import Task
+from src.db.models import Reminder, Task
 from src.services import calendar_service, reminder_service
+
+
+def _api_datetime_as_utc(value: str) -> datetime:
+    """SQLite drops timezone metadata even for timezone-aware test columns."""
+
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=ZoneInfo("UTC"))
 
 
 async def _create_proactive_task(client, auth_headers, *, title, due_at=None):
@@ -151,14 +158,10 @@ async def test_tasks_sorted_by_due_date_then_priority(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_accepting_proactive_task_auto_syncs_calendar_and_reminder(
+async def test_accepting_proactive_task_only_accepts_task_without_hidden_side_effects(
     client, auth_headers, monkeypatch
 ):
-    """Product decision: Accept on an AI-suggested task IS the human confirmation to both write
-    the matching Google Calendar event AND schedule a Reminder for the same due_at - no separate
-    dialog for either. (Reminders created this way still fire through the normal reminder flow;
-    this only skips the confirmation step, matching the same "Accept = confirm" reasoning already
-    applied to Calendar sync.)"""
+    """A button labelled Accept task cannot silently confirm calendar/reminder writes too."""
     fake_service = MagicMock()
     fake_service.events.return_value.insert.return_value.execute.return_value = {
         "id": "evt-1", "htmlLink": "https://calendar.google.com/event?eid=evt1",
@@ -166,7 +169,7 @@ async def test_accepting_proactive_task_auto_syncs_calendar_and_reminder(
     monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
 
     created = await _create_proactive_task(
-        client, auth_headers, title="Product launch call", due_at="2026-12-10T15:00:00"
+        client, auth_headers, title="Product launch call", due_at="2026-08-10T15:00:00"
     )
     assert created["status"] == "suggested"
 
@@ -174,22 +177,12 @@ async def test_accepting_proactive_task_auto_syncs_calendar_and_reminder(
         f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
     )
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "pending"
-    assert body["calendar_event_id"] == "evt-1"
-    assert body["reminder_id"] is not None
+    assert resp.json()["status"] == "pending"
 
-    fake_service.events.return_value.insert.assert_called_once()
-    call_kwargs = fake_service.events.return_value.insert.call_args.kwargs
-    assert call_kwargs["body"]["summary"] == "Product launch call"
-    assert call_kwargs["body"]["start"]["dateTime"] == "2026-12-10T15:00:00+07:00"
-    assert call_kwargs["body"]["end"]["dateTime"] == "2026-12-10T15:30:00+07:00"
+    fake_service.events.return_value.insert.assert_not_called()
 
     reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
-    reminder = next(r for r in reminders if r["title"] == "Product launch call")
-    assert reminder["id"] == body["reminder_id"]
-    assert reminder["due_at"].startswith("2026-12-10T15:00:00")
-    assert reminder["source"] == "proactive"
+    assert not any(r["title"] == "Product launch call" for r in reminders)
 
 
 @pytest.mark.asyncio
@@ -210,9 +203,6 @@ async def test_accepting_manual_task_does_not_touch_calendar_or_reminder(client,
     )
     assert resp.status_code == 200
     fake_service.events.return_value.insert.assert_not_called()
-    assert resp.json()["reminder_id"] is None
-    reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
-    assert not any(r["title"] == "Manual with due date" for r in reminders)
 
 
 @pytest.mark.asyncio
@@ -230,49 +220,10 @@ async def test_accepting_proactive_task_without_due_date_does_not_touch_calendar
     )
     assert resp.status_code == 200
     fake_service.events.return_value.insert.assert_not_called()
-    assert resp.json()["reminder_id"] is None
-    reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
-    assert not any(r["title"] == "No due date" for r in reminders)
 
 
 @pytest.mark.asyncio
-async def test_accepting_proactive_task_without_due_date_can_supply_one_to_sync(
-    client, auth_headers, monkeypatch
-):
-    """UI escape hatch for a suggestion Orbit couldn't find a clear date/time for (see
-    ConfirmTaskDueDateModal.jsx): the Accept request can carry a due_at alongside the status
-    change, applied before Calendar/Reminder sync runs - a suggestion with no due_at isn't stuck
-    unsynced forever, it just needs the human to supply the missing piece at Accept time."""
-    fake_service = MagicMock()
-    fake_service.events.return_value.insert.return_value.execute.return_value = {
-        "id": "evt-6", "htmlLink": "https://calendar.google.com/event?eid=evt6",
-    }
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
-
-    created = await _create_proactive_task(client, auth_headers, title="Đi ăn kem")
-    assert created["due_at"] is None
-    assert created["status"] == "suggested"
-
-    due_at_local = datetime.now(ZoneInfo(get_settings().calendar_timezone)) + timedelta(days=1)
-    due_at_local = due_at_local.replace(microsecond=0)
-    resp = await client.patch(
-        f"/api/v1/tasks/{created['id']}/status",
-        json={"status": "pending", "due_at": due_at_local.replace(tzinfo=None).isoformat()},
-        headers=auth_headers,
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "pending"
-    assert body["due_at"] is not None
-    assert body["calendar_event_id"] == "evt-6"
-    assert body["reminder_id"] is not None
-
-
-@pytest.mark.asyncio
-async def test_accepting_proactive_task_survives_calendar_sync_failure(client, auth_headers, monkeypatch):
-    """Calendar and Reminder sync on Accept are independent, best-effort actions: a broken Google
-    API must not stop Accept from succeeding, and must not stop the Reminder sync from still
-    happening."""
+async def test_accepting_proactive_task_never_calls_calendar(client, auth_headers, monkeypatch):
 
     def _broken_get_calendar_service():
         raise RuntimeError("Google API unreachable")
@@ -280,190 +231,298 @@ async def test_accepting_proactive_task_survives_calendar_sync_failure(client, a
     monkeypatch.setattr(calendar_service, "get_calendar_service", _broken_get_calendar_service)
 
     created = await _create_proactive_task(
-        client, auth_headers, title="Flaky calendar", due_at="2026-12-10T15:00:00"
+        client, auth_headers, title="Flaky calendar", due_at="2026-08-10T15:00:00"
     )
 
     resp = await client.patch(
         f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
     )
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "pending"
-    assert body["calendar_event_id"] is None
-    assert body["reminder_id"] is not None
+    assert resp.json()["status"] == "pending"
 
     reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
-    assert any(r["title"] == "Flaky calendar" for r in reminders)
+    assert not any(r["title"] == "Flaky calendar" for r in reminders)
 
 
 @pytest.mark.asyncio
-async def test_accepting_proactive_task_survives_reminder_sync_failure(client, auth_headers, monkeypatch):
-    """Same independence the other direction: a broken Reminder sync must not stop Accept from
-    succeeding, and must not stop the Calendar sync from still happening."""
-    fake_service = MagicMock()
-    fake_service.events.return_value.insert.return_value.execute.return_value = {
-        "id": "evt-2", "htmlLink": "https://calendar.google.com/event?eid=evt2",
-    }
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
-
-    async def _broken_schedule_reminder(**kwargs):
-        raise RuntimeError("Reminder scheduler unreachable")
-
-    monkeypatch.setattr(reminder_service, "schedule_reminder", _broken_schedule_reminder)
-
-    created = await _create_proactive_task(
-        client, auth_headers, title="Flaky reminder", due_at="2026-12-10T15:00:00"
+async def test_opted_in_task_creates_one_private_linked_reminder(client, auth_headers):
+    profile = await client.patch(
+        "/api/v1/auth/me",
+        json={
+            "preferences": {
+                "auto_task_reminders": True,
+                "default_reminder_lead_minutes": 60,
+            }
+        },
+        headers=auth_headers,
     )
+    assert profile.status_code == 200, profile.text
 
-    resp = await client.patch(
-        f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
+    due_at = datetime(2099, 8, 10, 15, 0, tzinfo=ZoneInfo("UTC"))
+    created = await client.post(
+        "/api/v1/tasks",
+        json={"title": "Linked deadline", "due_at": due_at.isoformat()},
+        headers=auth_headers,
     )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "pending"
-    assert body["calendar_event_id"] == "evt-2"
-    assert body["reminder_id"] is None
+    assert created.status_code == 201, created.text
 
     reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
-    assert not any(r["title"] == "Flaky reminder" for r in reminders)
+    linked = [item for item in reminders if item["task_id"] == created.json()["id"]]
+    assert len(linked) == 1
+    assert linked[0]["source"] == "proactive"
+    assert linked[0]["status"] == "scheduled"
+    assert _api_datetime_as_utc(linked[0]["due_at"]) == due_at
+    assert _api_datetime_as_utc(linked[0]["fire_at"]) == due_at - timedelta(hours=1)
 
 
 @pytest.mark.asyncio
-async def test_accepting_proactive_task_with_past_due_date_skips_reminder_sync(
-    client, auth_headers, monkeypatch
+async def test_task_deadline_reschedules_same_reminder_and_completion_cancels_it(
+    client, auth_headers
 ):
-    """schedule_reminder rejects a due_at too close to (or past) now - this must be silently
-    skipped, same as any other reminder-sync failure, never surfaced as a failed Accept."""
-    fake_service = MagicMock()
-    fake_service.events.return_value.insert.return_value.execute.return_value = {
-        "id": "evt-3", "htmlLink": "https://calendar.google.com/event?eid=evt3",
-    }
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
-
-    created = await _create_proactive_task(
-        client, auth_headers, title="Already due", due_at="2026-01-01T09:00:00"
+    await client.patch(
+        "/api/v1/auth/me",
+        json={
+            "preferences": {
+                "auto_task_reminders": True,
+                "default_reminder_lead_minutes": 30,
+            }
+        },
+        headers=auth_headers,
     )
-
-    resp = await client.patch(
-        f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["calendar_event_id"] == "evt-3"
-    assert body["reminder_id"] is None
-
-
-@pytest.mark.asyncio
-async def test_accepting_proactive_task_due_soon_still_gets_a_reminder(client, auth_headers, monkeypatch):
-    """A due_at only minutes away must not lose its reminder just because the default 30-minute
-    lead would push the notification time into the past - the lead should shrink instead of the
-    reminder disappearing. Uses a due_at relative to real now (not a fixed date) since this test is
-    specifically about that near-term boundary."""
-    fake_service = MagicMock()
-    fake_service.events.return_value.insert.return_value.execute.return_value = {
-        "id": "evt-4", "htmlLink": "https://calendar.google.com/event?eid=evt4",
-    }
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
-
-    # Naive, no explicit offset - same convention as every other due_at fixture in this file
-    # (matching how a real AI-extracted due_at arrives, per create_task's own comment); it's
-    # interpreted as calendar_timezone (Asia/Ho_Chi_Minh) wall-clock time.
-    due_at_local = datetime.now(ZoneInfo(get_settings().calendar_timezone)) + timedelta(minutes=10)
-    due_at_local = due_at_local.replace(microsecond=0)
-    created = await _create_proactive_task(
-        client, auth_headers, title="Ăn tối", due_at=due_at_local.replace(tzinfo=None).isoformat()
-    )
-
-    resp = await client.patch(
-        f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["calendar_event_id"] == "evt-4"
-    assert body["reminder_id"] is not None
-
-    reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
-    reminder = next(r for r in reminders if r["title"] == "Ăn tối")
-    # SQLite (this test DB) doesn't reliably round-trip tzinfo on DateTime(timezone=True) columns -
-    # a naive result here means "Asia/Ho_Chi_Minh wall clock", same assumption applied to due_at
-    # above and throughout this codebase's own naive-datetime handling.
-    tz = ZoneInfo(get_settings().calendar_timezone)
-
-    def _aware(dt: datetime) -> datetime:
-        return dt if dt.tzinfo else dt.replace(tzinfo=tz)
-
-    fire_at = _aware(datetime.fromisoformat(reminder["fire_at"]))
-    due_at_aware = _aware(due_at_local)
-    assert datetime.now(UTC) < fire_at < due_at_aware
-
-
-@pytest.mark.asyncio
-async def test_accepting_proactive_task_reminder_is_visible_under_a_workspace_mismatch(
-    client, auth_headers, other_auth_headers, monkeypatch
-):
-    """Reported live: the reminder was created but never showed up on the accepting user's own
-    Reminders page. Root cause - GET /reminders filters strictly on owner_id AND workspace_id (no
-    personal-workspace exception like list_tasks has), but a proactive task can legitimately carry
-    a *different* participant's personal workspace_id (see list_tasks's own comment on this same
-    caveat) - saving the reminder under task.workspace_id made it invisible to the accepting
-    user's own query. Simulates that mismatch directly: Alice's task points at Bob's workspace."""
-    fake_service = MagicMock()
-    fake_service.events.return_value.insert.return_value.execute.return_value = {
-        "id": "evt-5", "htmlLink": "https://calendar.google.com/event?eid=evt5",
-    }
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
-
-    bob_workspaces = (await client.get("/api/v1/workspaces", headers=other_auth_headers)).json()
-    bob_workspace_id = next(w["id"] for w in bob_workspaces if w["type"] == "personal")
-
-    due_at_local = datetime.now(ZoneInfo(get_settings().calendar_timezone)) + timedelta(hours=2)
-    created = await _create_proactive_task(
-        client, auth_headers, title="Ăn tối", due_at=due_at_local.replace(tzinfo=None).isoformat()
-    )
-    async with db_session.async_session_maker() as db:
-        task = (await db.execute(select(Task).where(Task.id == created["id"]))).scalar_one()
-        task.workspace_id = bob_workspace_id  # Alice's task, Bob's workspace - the mismatch
-        await db.commit()
-
-    resp = await client.patch(
-        f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
-    )
-    assert resp.status_code == 200
-    reminder_id = resp.json()["reminder_id"]
-    assert reminder_id is not None
-
-    reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
-    assert any(r["id"] == reminder_id for r in reminders)
-
-
-@pytest.mark.asyncio
-async def test_deleting_synced_calendar_event_dismisses_the_linked_task(client, auth_headers, monkeypatch):
-    """Task <-> Calendar sync is two-way: once Accept auto-created a Calendar event for a task
-    (see the accept test above), deleting that event - from the app's own Delete event button, or
-    detected from Google Calendar itself via poll_calendar_changes - must not leave the task
-    looking like it's still awaiting the user's attention."""
-    fake_service = MagicMock()
-    fake_service.events.return_value.insert.return_value.execute.return_value = {
-        "id": "evt-linked", "htmlLink": "https://calendar.google.com/event?eid=evtlinked",
-    }
-    monkeypatch.setattr(calendar_service, "get_calendar_service", lambda: fake_service)
-
-    created = await _create_proactive_task(
-        client, auth_headers, title="Họp ngày mai", due_at="2026-08-25T09:00:00"
-    )
-    accepted = (
-        await client.patch(
-            f"/api/v1/tasks/{created['id']}/status", json={"status": "pending"}, headers=auth_headers
+    first_due = datetime(2099, 8, 10, 15, 0, tzinfo=ZoneInfo("UTC"))
+    created = (
+        await client.post(
+            "/api/v1/tasks",
+            json={"title": "Moving deadline", "due_at": first_due.isoformat()},
+            headers=auth_headers,
         )
     ).json()
-    assert accepted["calendar_event_id"] == "evt-linked"
+    first_reminder = next(
+        item
+        for item in (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+        if item["task_id"] == created["id"]
+    )
 
-    user_id = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()["id"]
-    # Exercises exactly what calendar_routes.delete_event and poll_calendar_changes both call once
-    # Google confirms the event is gone - no need to re-mock the Google client for this part.
-    await calendar_service.broadcast_change(user_id, "calendar_event_deleted", {"event_id": "evt-linked"})
+    second_due = first_due + timedelta(days=2)
+    updated = await client.patch(
+        f"/api/v1/tasks/{created['id']}",
+        json={"due_at": second_due.isoformat(), "expected_row_version": created["row_version"]},
+        headers=auth_headers,
+    )
+    assert updated.status_code == 200, updated.text
+    second_reminder = next(
+        item
+        for item in (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+        if item["task_id"] == created["id"]
+    )
+    assert second_reminder["id"] == first_reminder["id"]
+    assert _api_datetime_as_utc(second_reminder["due_at"]) == second_due
+    assert _api_datetime_as_utc(second_reminder["fire_at"]) == second_due - timedelta(minutes=30)
 
-    tasks = (await client.get("/api/v1/tasks", headers=auth_headers)).json()
-    task = next(t for t in tasks if t["id"] == created["id"])
-    assert task["status"] == "dismissed"
-    assert task["calendar_event_id"] is None
+    completed = await client.patch(
+        f"/api/v1/tasks/{created['id']}/status",
+        json={"status": "completed", "expected_row_version": updated.json()["row_version"]},
+        headers=auth_headers,
+    )
+    assert completed.status_code == 200, completed.text
+    cancelled = next(
+        item
+        for item in (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+        if item["task_id"] == created["id"]
+    )
+    assert cancelled["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_task_reminder_opt_out_and_global_lead_change_reconcile_existing_task(
+    client, auth_headers
+):
+    await client.patch(
+        "/api/v1/auth/me",
+        json={
+            "preferences": {
+                "auto_task_reminders": True,
+                "default_reminder_lead_minutes": 15,
+            }
+        },
+        headers=auth_headers,
+    )
+    due_at = datetime(2099, 8, 10, 15, 0, tzinfo=ZoneInfo("UTC"))
+    task = (
+        await client.post(
+            "/api/v1/tasks",
+            json={"title": "Configurable reminder", "due_at": due_at.isoformat()},
+            headers=auth_headers,
+        )
+    ).json()
+
+    opted_out = await client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        json={"auto_reminder_enabled": False, "expected_row_version": task["row_version"]},
+        headers=auth_headers,
+    )
+    assert opted_out.status_code == 200, opted_out.text
+    reminder = next(
+        item
+        for item in (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+        if item["task_id"] == task["id"]
+    )
+    assert reminder["status"] == "cancelled"
+
+    opted_in = await client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        json={
+            "auto_reminder_enabled": True,
+            "expected_row_version": opted_out.json()["row_version"],
+        },
+        headers=auth_headers,
+    )
+    assert opted_in.status_code == 200, opted_in.text
+    await client.patch(
+        "/api/v1/auth/me",
+        json={
+            "preferences": {
+                "auto_task_reminders": True,
+                "default_reminder_lead_minutes": 60,
+            }
+        },
+        headers=auth_headers,
+    )
+    rescheduled = next(
+        item
+        for item in (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+        if item["task_id"] == task["id"]
+    )
+    assert rescheduled["status"] == "scheduled"
+    assert _api_datetime_as_utc(rescheduled["fire_at"]) == due_at - timedelta(hours=1)
+
+
+@pytest.mark.asyncio
+async def test_task_managed_reminder_cannot_be_cancelled_as_manual_reminder(client, auth_headers):
+    await client.patch(
+        "/api/v1/auth/me",
+        json={"preferences": {"auto_task_reminders": True}},
+        headers=auth_headers,
+    )
+    task = (
+        await client.post(
+            "/api/v1/tasks",
+            json={"title": "Managed reminder", "due_at": "2099-08-10T15:00:00Z"},
+            headers=auth_headers,
+        )
+    ).json()
+    reminder = next(
+        item
+        for item in (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+        if item["task_id"] == task["id"]
+    )
+    response = await client.delete(f"/api/v1/reminders/{reminder['id']}", headers=auth_headers)
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_deleting_task_removes_linked_reminder(client, auth_headers):
+    await client.patch(
+        "/api/v1/auth/me",
+        json={"preferences": {"auto_task_reminders": True}},
+        headers=auth_headers,
+    )
+    task = (
+        await client.post(
+            "/api/v1/tasks",
+            json={"title": "Delete linked reminder", "due_at": "2099-08-10T15:00:00Z"},
+            headers=auth_headers,
+        )
+    ).json()
+    response = await client.delete(f"/api/v1/tasks/{task['id']}", headers=auth_headers)
+    assert response.status_code == 204
+    reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+    assert all(item["task_id"] != task["id"] for item in reminders)
+
+
+@pytest.mark.asyncio
+async def test_reassigning_task_moves_private_reminder_between_owners(client, auth_headers):
+    await client.patch(
+        "/api/v1/auth/me",
+        json={"preferences": {"auto_task_reminders": True}},
+        headers=auth_headers,
+    )
+    task = (
+        await client.post(
+            "/api/v1/tasks",
+            json={"title": "Reassigned task", "due_at": "2099-08-10T15:00:00Z"},
+            headers=auth_headers,
+        )
+    ).json()
+
+    registered = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "new-owner@example.com",
+            "password": "password123",
+            "display_name": "New Owner",
+        },
+    )
+    assert registered.status_code == 201, registered.text
+    logged_in = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "new-owner@example.com", "password": "password123"},
+    )
+    second_headers = {"Authorization": f"Bearer {logged_in.json()['access_token']}"}
+    await client.patch(
+        "/api/v1/auth/me",
+        json={"preferences": {"auto_task_reminders": True}},
+        headers=second_headers,
+    )
+
+    async with db_session.async_session_maker() as db:
+        stored = await db.get(Task, task["id"])
+        stored.owner_id = registered.json()["id"]
+        await db.commit()
+    await reminder_service.reconcile_task_reminder(task["id"])
+
+    former_owner_reminders = (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+    new_owner_reminders = (await client.get("/api/v1/reminders", headers=second_headers)).json()
+    assert all(item["task_id"] != task["id"] for item in former_owner_reminders)
+    assert len([item for item in new_owner_reminders if item["task_id"] == task["id"]]) == 1
+
+
+@pytest.mark.asyncio
+async def test_periodic_sweep_repairs_out_of_band_task_reminder_drift(client, auth_headers):
+    await client.patch(
+        "/api/v1/auth/me",
+        json={
+            "preferences": {
+                "auto_task_reminders": True,
+                "default_reminder_lead_minutes": 30,
+            }
+        },
+        headers=auth_headers,
+    )
+    due_at = datetime(2099, 8, 20, 15, 0, tzinfo=ZoneInfo("UTC"))
+    task = (
+        await client.post(
+            "/api/v1/tasks",
+            json={"title": "Sweep protected", "due_at": due_at.isoformat()},
+            headers=auth_headers,
+        )
+    ).json()
+
+    async with db_session.async_session_maker() as db:
+        reminder = await db.scalar(select(Reminder).where(Reminder.task_id == task["id"]))
+        reminder.status = "cancelled"
+        reminder.due_at = due_at + timedelta(days=1)
+        reminder.fire_at = due_at + timedelta(days=1) - timedelta(minutes=30)
+        await db.commit()
+
+    processed = await reminder_service.reconcile_active_task_reminders(batch_size=1)
+
+    assert processed >= 1
+    repaired = next(
+        item
+        for item in (await client.get("/api/v1/reminders", headers=auth_headers)).json()
+        if item["task_id"] == task["id"]
+    )
+    assert repaired["status"] == "scheduled"
+    assert _api_datetime_as_utc(repaired["due_at"]) == due_at
+    assert _api_datetime_as_utc(repaired["fire_at"]) == due_at - timedelta(minutes=30)

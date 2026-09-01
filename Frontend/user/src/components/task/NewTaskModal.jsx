@@ -1,11 +1,9 @@
 import { useState } from 'react'
 import { createTask } from '../../api/tasks'
 import { useAuth } from '../../context/AuthContext'
-import { useWorkspace } from '../../context/WorkspaceContext'
 
 export default function NewTaskModal({ open, onClose, onCreated }) {
   const { token } = useAuth()
-  const { workspaceId } = useWorkspace()
   const [title, setTitle] = useState('')
   const [dueAt, setDueAt] = useState('')
   const [priority, setPriority] = useState('Medium')
@@ -20,7 +18,6 @@ export default function NewTaskModal({ open, onClose, onCreated }) {
     setSubmitting(true); setError('')
     try {
       const task = await createTask(token, {
-        workspace_id: workspaceId,
         title: title.trim(),
         due_at: dueAt ? new Date(dueAt).toISOString() : null,
         priority,
@@ -36,7 +33,7 @@ export default function NewTaskModal({ open, onClose, onCreated }) {
 
   return <div className="modal show d-block" tabIndex="-1" style={{background:'rgba(20,30,50,.32)'}} onClick={onClose}>
     <div className="modal-dialog modal-dialog-centered" onClick={event=>event.stopPropagation()}><div className="modal-content">
-      <div className="modal-header"><h5 className="modal-title">New task</h5><button className="btn-close" onClick={onClose}/></div>
+      <div className="modal-header"><h5 className="modal-title">New personal task</h5><button className="btn-close" onClick={onClose}/></div>
       <form onSubmit={submit}><div className="modal-body d-flex flex-column gap-3">
         {error && <div className="auth-error">{error}</div>}
         <input className="form-control" placeholder="Task title" value={title} onChange={event=>setTitle(event.target.value)} maxLength={200} required/>

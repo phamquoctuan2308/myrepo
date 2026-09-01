@@ -38,7 +38,8 @@ async def test_register_is_rate_limited_per_ip(client):
 
 @pytest.mark.asyncio
 async def test_chat_is_rate_limited_per_user(client, auth_headers, monkeypatch):
-    async def _over_budget():
+    async def _over_budget(user_id):
+        assert user_id
         return True
 
     monkeypatch.setattr(usage_service, "is_over_budget", _over_budget)
@@ -53,3 +54,22 @@ async def test_chat_is_rate_limited_per_user(client, auth_headers, monkeypatch):
 async def test_health_is_exempt(client):
     for _ in range(70):
         assert (await client.get("/health")).status_code == 200
+
+
+def test_read_and_mutation_requests_use_separate_rate_limit_tiers(monkeypatch):
+    settings = type("Settings", (), {
+        "rate_limit_register": "5/minute",
+        "rate_limit_auth": "10/minute",
+        "rate_limit_chat": "15/minute",
+        "rate_limit_read": "300/minute",
+        "rate_limit_crud": "60/minute",
+    })()
+    monkeypatch.setattr("src.api.rate_limit.get_settings", lambda: settings)
+
+    from starlette.requests import Request
+
+    read_request = Request({"type": "http", "method": "GET", "path": "/api/v1/tasks", "headers": []})
+    write_request = Request({"type": "http", "method": "PATCH", "path": "/api/v1/tasks/1", "headers": []})
+
+    assert request_limiter._tier(read_request) == ("read", "300/minute")
+    assert request_limiter._tier(write_request) == ("crud", "60/minute")

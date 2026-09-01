@@ -18,6 +18,8 @@ class CalendarEventCreateRequest(BaseModel):
     end_iso: datetime
     description: str = Field(default="", max_length=5000)
     attendees: list[EmailStr] | None = None
+    create_reminder: bool = False
+    reminder_lead_minutes: int = Field(default=30, ge=0, le=10080)
 
     @model_validator(mode="after")
     def validate_range(self):
@@ -59,6 +61,11 @@ class EventCandidateOut(BaseModel):
     invalidated_reason: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class EventCandidateConfirmRequest(BaseModel):
+    create_reminder: bool = True
+    reminder_lead_minutes: int = Field(default=30, ge=0, le=10080)
 
 
 class EventBackfillRequest(BaseModel):

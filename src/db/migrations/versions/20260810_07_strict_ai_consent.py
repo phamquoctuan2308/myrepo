@@ -27,7 +27,10 @@ def upgrade() -> None:
     task_constraints = {
         item["name"] for item in sa.inspect(connection).get_check_constraints("tasks") if item.get("name")
     }
-    with op.batch_alter_table("tasks") as batch_op:
+    # Fresh databases are built from current metadata at revision 01 and may
+    # already carry future FKs. Do not resolve those not-yet-historical tables
+    # while SQLite reflects ``tasks`` for this revision.
+    with op.batch_alter_table("tasks", reflect_kwargs={"resolve_fks": False}) as batch_op:
         if "source_message_ids" not in task_columns:
             batch_op.add_column(sa.Column("source_message_ids", sa.JSON(), nullable=True))
         if "source_sender_id" not in task_columns:

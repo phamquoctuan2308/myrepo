@@ -93,5 +93,3 @@ export const listMemories = (token, workspaceId, ownerId) =>
 
 export const deleteMemory = (token, workspaceId, memoryId) =>
   apiFetch(`/admin/memories/${memoryId}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: 'DELETE', token })
-
-export const updateUserBudget = (token, userId, daily_token_budget) => apiFetch(`/admin/users/${userId}/budget`, { method: 'PATCH', token, body: { daily_token_budget } })

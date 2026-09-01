@@ -4,6 +4,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 TimelineKind = Literal["message", "task", "reminder", "calendar"]
+TimelinePriority = Literal["High", "Medium", "Low"]
+TimelineScope = Literal["personal", "workspace"]
 
 
 class TimelineItem(BaseModel):
@@ -18,6 +20,14 @@ class TimelineItem(BaseModel):
     conversation_id: str | None = None
     source_message_ids: list[str] = Field(default_factory=list)
     url: str | None = None
+    priority: TimelinePriority | None = None
+    blocked_reason: str | None = None
+    overdue: bool = False
+    scope: TimelineScope | None = None
+    linked_task_id: str | None = None
+    linked_calendar_event_id: str | None = None
+    reminder_lead_minutes: int | None = None
+    auto_reminder_enabled: bool | None = None
 
 
 class TimelineSourceStatus(BaseModel):

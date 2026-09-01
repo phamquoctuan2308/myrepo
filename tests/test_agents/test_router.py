@@ -1,167 +1,124 @@
-"""src.agents.router.route_agent_request - deterministic profile selection (no LLM, no membership
-check - that's scope_resolver's job, exercised separately in test_context_builder.py)."""
+from types import SimpleNamespace
 
 import pytest
 
-import src.db.session as db_session
-from src.agents.contracts import AgentIntent, AgentInvocationRequest, AgentProfile, RequestedScope
+from src.agents.contracts import (
+    AgentIntent,
+    AgentInvocationRequest,
+    AgentProfile,
+    PolicyReason,
+    RequestedScope,
+)
 from src.agents.router import AgentRouteDeniedError, route_agent_request
-from src.db.models import AgentWorkspace, Workspace
+from src.agents.tools.registry import (
+    assert_tool_allowed,
+    get_profile_registration,
+    list_profile_registrations,
+)
 
 
-async def _make_org() -> str:
-    async with db_session.async_session_maker() as db:
-        org = Workspace(type="organization", name="Orbit Demo Org")
-        db.add(org)
-        await db.commit()
-        return org.id
+class FakeSession:
+    def __init__(self, workspace=None):
+        self.workspace = workspace
+
+    async def get(self, _model, _identifier):
+        return self.workspace
 
 
-async def _make_agent_workspace(org_id: str, *, profile: str, status: str = "active") -> str:
-    async with db_session.async_session_maker() as db:
-        workspace = AgentWorkspace(
-            organization_workspace_id=org_id,
-            key=profile,
-            name=profile,
-            agent_profile=profile,
-            status=status,
-        )
-        db.add(workspace)
-        await db.commit()
-        return workspace.id
-
-
-@pytest.mark.asyncio
-async def test_personal_scope_routes_to_personal_profile_regardless_of_intent():
-    async with db_session.async_session_maker() as db:
-        route = await route_agent_request(
-            db,
-            organization_workspace_id="does-not-matter",
-            invocation=AgentInvocationRequest(message="hi", requested_scope=RequestedScope.PERSONAL),
-            intent=AgentIntent.SUMMARIZE,
-        )
-    assert route.profile == AgentProfile.PERSONAL
-    assert "summarize_conversation" in route.allowed_tools
+def _invocation(scope: RequestedScope, target: str | None = None) -> AgentInvocationRequest:
+    return AgentInvocationRequest(
+        message="Tạo brief",
+        requested_scope=scope,
+        target_agent_workspace_id=target,
+    )
 
 
 @pytest.mark.asyncio
-async def test_personal_scope_with_target_workspace_is_denied():
-    async with db_session.async_session_maker() as db:
-        with pytest.raises(AgentRouteDeniedError):
-            await route_agent_request(
-                db,
-                organization_workspace_id="org-1",
-                invocation=AgentInvocationRequest(
-                    message="hi",
-                    requested_scope=RequestedScope.PERSONAL,
-                    target_agent_workspace_id="some-workspace",
-                ),
-                intent=AgentIntent.SUMMARIZE,
-            )
-
-
-@pytest.mark.asyncio
-async def test_aggregate_scope_routes_to_executive_profile():
-    async with db_session.async_session_maker() as db:
-        route = await route_agent_request(
-            db,
-            organization_workspace_id="org-1",
-            invocation=AgentInvocationRequest(message="brief me", requested_scope=RequestedScope.AGGREGATE),
-            intent=AgentIntent.EXECUTIVE_BRIEF,
+async def test_router_selects_specialist_from_trusted_workspace_profile():
+    db = FakeSession(
+        SimpleNamespace(
+            id="quality-1",
+            organization_workspace_id="organization-1",
+            agent_profile="quality_assurance",
+            status="active",
         )
-    assert route.profile == AgentProfile.EXECUTIVE
-
-
-@pytest.mark.asyncio
-async def test_workspace_scope_routes_to_the_agent_workspace_own_profile(client):
-    org_id = await _make_org()
-    workspace_id = await _make_agent_workspace(org_id, profile="quality_assurance")
-
-    async with db_session.async_session_maker() as db:
-        route = await route_agent_request(
-            db,
-            organization_workspace_id=org_id,
-            invocation=AgentInvocationRequest(
-                message="readiness?",
-                requested_scope=RequestedScope.WORKSPACE,
-                target_agent_workspace_id=workspace_id,
-            ),
-            intent=AgentIntent.QUALITY_READINESS,
-        )
+    )
+    route = await route_agent_request(
+        db,
+        organization_workspace_id="organization-1",
+        invocation=_invocation(RequestedScope.WORKSPACE, "quality-1"),
+        intent=AgentIntent.QUALITY_BRIEF,
+    )
     assert route.profile == AgentProfile.QUALITY_ASSURANCE
-    assert route.target_agent_workspace_id == workspace_id
+    assert route.prompt_version == "quality-assurance-v3"
+    assert "build_quality_brief" in route.allowed_tools
+    assert "build_delivery_brief" not in route.allowed_tools
 
 
 @pytest.mark.asyncio
-async def test_workspace_scope_wrong_intent_for_that_profile_is_denied(client):
-    """A Quality Assurance workspace's route can never satisfy a DELIVERY_BRIEF intent - this is the
-    "Delivery user không query được Quality" boundary, enforced deterministically, not by the LLM."""
-    org_id = await _make_org()
-    workspace_id = await _make_agent_workspace(org_id, profile="quality_assurance")
-
-    async with db_session.async_session_maker() as db:
-        with pytest.raises(AgentRouteDeniedError):
-            await route_agent_request(
-                db,
-                organization_workspace_id=org_id,
-                invocation=AgentInvocationRequest(
-                    message="milestones?",
-                    requested_scope=RequestedScope.WORKSPACE,
-                    target_agent_workspace_id=workspace_id,
-                ),
-                intent=AgentIntent.DELIVERY_BRIEF,
-            )
-
-
-@pytest.mark.asyncio
-async def test_workspace_scope_denies_suspended_agent_workspace(client):
-    org_id = await _make_org()
-    workspace_id = await _make_agent_workspace(org_id, profile="product_delivery", status="suspended")
-
-    async with db_session.async_session_maker() as db:
-        with pytest.raises(AgentRouteDeniedError):
-            await route_agent_request(
-                db,
-                organization_workspace_id=org_id,
-                invocation=AgentInvocationRequest(
-                    message="milestones?",
-                    requested_scope=RequestedScope.WORKSPACE,
-                    target_agent_workspace_id=workspace_id,
-                ),
-                intent=AgentIntent.DELIVERY_BRIEF,
-            )
+async def test_router_rejects_intent_profile_mismatch():
+    db = FakeSession(
+        SimpleNamespace(
+            id="delivery-1",
+            organization_workspace_id="organization-1",
+            agent_profile="product_delivery",
+            status="active",
+        )
+    )
+    with pytest.raises(AgentRouteDeniedError) as error:
+        await route_agent_request(
+            db,
+            organization_workspace_id="organization-1",
+            invocation=_invocation(RequestedScope.WORKSPACE, "delivery-1"),
+            intent=AgentIntent.QUALITY_BRIEF,
+        )
+    assert error.value.reason == PolicyReason.PROFILE_MISMATCH
 
 
 @pytest.mark.asyncio
-async def test_workspace_scope_denies_agent_workspace_from_a_different_organization(client):
-    """A target_agent_workspace_id that's real but belongs to another org must not leak which
-    profile it is - denied the same way as "wrong workspace", not treated as a valid Delivery/QA
-    route just because the id happens to resolve."""
-    org_id = await _make_org()
-    other_org_id = await _make_org()
-    workspace_id = await _make_agent_workspace(other_org_id, profile="product_delivery")
-
-    async with db_session.async_session_maker() as db:
-        with pytest.raises(AgentRouteDeniedError):
-            await route_agent_request(
-                db,
-                organization_workspace_id=org_id,
-                invocation=AgentInvocationRequest(
-                    message="milestones?",
-                    requested_scope=RequestedScope.WORKSPACE,
-                    target_agent_workspace_id=workspace_id,
-                ),
-                intent=AgentIntent.DELIVERY_BRIEF,
-            )
+async def test_router_rejects_workspace_from_another_organization():
+    db = FakeSession(
+        SimpleNamespace(
+            id="delivery-1",
+            organization_workspace_id="organization-2",
+            agent_profile="product_delivery",
+            status="active",
+        )
+    )
+    with pytest.raises(AgentRouteDeniedError) as error:
+        await route_agent_request(
+            db,
+            organization_workspace_id="organization-1",
+            invocation=_invocation(RequestedScope.WORKSPACE, "delivery-1"),
+            intent=AgentIntent.DELIVERY_BRIEF,
+        )
+    assert error.value.reason == PolicyReason.WRONG_WORKSPACE
 
 
 @pytest.mark.asyncio
-async def test_workspace_scope_without_target_id_is_denied():
-    async with db_session.async_session_maker() as db:
-        with pytest.raises(AgentRouteDeniedError):
-            await route_agent_request(
-                db,
-                organization_workspace_id="org-1",
-                invocation=AgentInvocationRequest(message="hi", requested_scope=RequestedScope.WORKSPACE),
-                intent=AgentIntent.DELIVERY_BRIEF,
-            )
+async def test_router_selects_personal_and_executive_without_client_profile():
+    personal = await route_agent_request(
+        FakeSession(),
+        organization_workspace_id="organization-1",
+        invocation=_invocation(RequestedScope.PERSONAL),
+        intent=AgentIntent.PERSONAL_ASSISTANCE,
+    )
+    executive = await route_agent_request(
+        FakeSession(),
+        organization_workspace_id="organization-1",
+        invocation=_invocation(RequestedScope.AGGREGATE),
+        intent=AgentIntent.EXECUTIVE_BRIEF,
+    )
+    assert personal.profile == AgentProfile.PERSONAL
+    assert executive.profile == AgentProfile.EXECUTIVE
+
+
+def test_registry_has_one_strict_allowlist_per_profile():
+    registrations = list_profile_registrations()
+    assert {registration.profile for registration in registrations} == set(AgentProfile)
+    assert_tool_allowed(AgentProfile.PRODUCT_DELIVERY, "build_delivery_brief")
+    with pytest.raises(PermissionError, match="not allowed"):
+        assert_tool_allowed(AgentProfile.PRODUCT_DELIVERY, "build_quality_brief")
+    assert get_profile_registration(AgentProfile.EXECUTIVE).allowed_scopes == (
+        RequestedScope.AGGREGATE,
+    )

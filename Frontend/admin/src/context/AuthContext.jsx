@@ -26,12 +26,10 @@ export function AuthProvider({ children }) {
     setUser(data.user)
   }
 
-  const loginWithHandoff = async (ticket) => { const data = await authApi.consumeAdminHandoff(ticket); if (data.user?.platform_role !== 'platform_admin') throw new Error('Platform administrator access is required.'); localStorage.setItem(TOKEN_KEY, data.access_token); setToken(data.access_token); setUser(data.user) }
-
   const logout = () => { localStorage.removeItem(TOKEN_KEY); setToken(null); setUser(null) }
   const isAdmin = user?.platform_role === 'platform_admin'
 
-  return <AuthContext.Provider value={{ token, user, loading, isAdmin, login, loginWithHandoff, logout }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ token, user, loading, isAdmin, login, logout }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

@@ -8,8 +8,8 @@ export const listCalendarEvents = (token, { time_min, time_max } = {}) => {
   return apiFetch(`/calendar/events${qs ? `?${qs}` : ''}`, { token })
 }
 
-export const createCalendarEvent = (token, { summary, start_iso, end_iso, description, attendees }) =>
-  apiFetch('/calendar/events', { method: 'POST', token, body: { summary, start_iso, end_iso, description, attendees } })
+export const createCalendarEvent = (token, { summary, start_iso, end_iso, description, attendees, create_reminder, reminder_lead_minutes }) =>
+  apiFetch('/calendar/events', { method: 'POST', token, body: { summary, start_iso, end_iso, description, attendees, create_reminder, reminder_lead_minutes } })
 
 export const updateCalendarEvent = (token, eventId, { summary, start_iso, end_iso, description } = {}) =>
   apiFetch(`/calendar/events/${eventId}`, { method: 'PATCH', token, body: { summary, start_iso, end_iso, description } })
@@ -25,8 +25,8 @@ export const disconnectCalendar = (token) =>
 export const listEventCandidates = (token, conversationId) =>
   apiFetch(`/calendar/candidates?conversation_id=${encodeURIComponent(conversationId)}`, { token })
 
-export const confirmEventCandidate = (token, candidateId) =>
-  apiFetch(`/calendar/candidates/${candidateId}/confirm`, { method: 'POST', token })
+export const confirmEventCandidate = (token, candidateId, options = {}) =>
+  apiFetch(`/calendar/candidates/${candidateId}/confirm`, { method: 'POST', token, body: options })
 
 export const dismissEventCandidate = (token, candidateId) =>
   apiFetch(`/calendar/candidates/${candidateId}/dismiss`, { method: 'POST', token })

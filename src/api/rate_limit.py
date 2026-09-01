@@ -59,6 +59,8 @@ class RequestRateLimiter:
             return "auth", settings.rate_limit_auth
         if path == "/api/v1/chat" and request.method == "POST":
             return "chat", settings.rate_limit_chat
+        if request.method in {"GET", "HEAD"}:
+            return "read", settings.rate_limit_read
         return "crud", settings.rate_limit_crud
 
     async def check(self, request: Request) -> tuple[bool, int]:

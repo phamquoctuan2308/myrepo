@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 
 from src.agents import graph as agent_graph
-from src.services import calendar_service
+from src.services import calendar_service, reminder_service
 
 
 def _config():
@@ -20,6 +20,16 @@ def _agent_input(message):
 def _allow_calendar(monkeypatch):
     monkeypatch.setattr(calendar_service, "authorize_calendar_access", AsyncMock())
     monkeypatch.setattr(calendar_service, "broadcast_change", AsyncMock())
+    monkeypatch.setattr(
+        reminder_service,
+        "reconcile_calendar_event_reminder",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        reminder_service,
+        "remove_calendar_event_reminder",
+        AsyncMock(return_value=None),
+    )
 
 
 def _script_tool_call(fake_llm_factory, tool_name: str, args: dict):

@@ -10,13 +10,21 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from fastapi import HTTPException
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import get_settings
-from src.db.models import AIPermission, Conversation, ConversationParticipant, Message, User
+from src.db.models import (
+    AIPermission,
+    Conversation,
+    ConversationParticipant,
+    ExternalContact,
+    Message,
+    User,
+)
 from src.models.schemas import MessageScope
-from src.services.authorization_service import get_authorized_participant_ids
+from src.services.authorization_service import get_authorized_participant_ids, require_conversation_access
 
 
 @dataclass(frozen=True)
@@ -166,7 +174,17 @@ async def build_authorized_message_view(
             query = query.where(Message.created_at > participant.last_read_at, Message.sender_id != user_id)
         else:
             query = query.where(False)
-        rows = list((await db.execute(query.order_by(Message.created_at, Message.id).limit(500))).all())
+        # Start at the newest unread message and walk backwards, capped at 200. Reverse the
+        # selected window before formatting so the model still receives natural chronology.
+        unread_limit = min(selected_scope.count or limit or 200, 200)
+        rows = list(
+            (
+                await db.execute(
+                    query.order_by(Message.created_at.desc(), Message.id.desc()).limit(unread_limit)
+                )
+            ).all()
+        )
+        rows.reverse()
     else:
         since: datetime | None = None
         until: datetime | None = None
@@ -262,4 +280,93 @@ async def search_authorized_messages(
     return "\n".join(
         f"{sender.display_name} [{message.created_at.astimezone(timezone).isoformat()}]: {message.content}"
         for message, sender in rows
+    )
+
+
+async def search_authorized_messages_for_user(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    query: str,
+    limit: int = 20,
+) -> str:
+    """Search every currently accessible conversation while preserving author-side AI consent.
+
+    This is the Personal Agent's global chat-search boundary. Conversation membership alone is
+    insufficient: group AI must be enabled, or the caller must have granted AI access in a direct
+    conversation, and only messages from authors who allowed contribution are returned.
+    """
+
+    if not query.strip():
+        return ""
+    user = await db.get(User, user_id)
+    if user is None or not user.is_active:
+        return ""
+    linked_contacts = select(ExternalContact.id).where(ExternalContact.linked_user_id == user_id)
+    candidate_ids = list(
+        (
+            await db.execute(
+                select(ConversationParticipant.conversation_id)
+                .where(
+                    ConversationParticipant.revoked_at.is_(None),
+                    ConversationParticipant.hidden_at.is_(None),
+                    or_(
+                        ConversationParticipant.user_id == user_id,
+                        ConversationParticipant.external_contact_id.in_(linked_contacts),
+                    ),
+                )
+                .distinct()
+                .limit(200)
+            )
+        ).scalars()
+    )
+    safe_limit = max(1, min(limit, 50))
+    matches: list[tuple[Message, User, Conversation]] = []
+    pattern = f"%{_escape_ilike(query)}%"
+    for conversation_id in candidate_ids:
+        try:
+            await require_conversation_access(db, user, conversation_id, "viewer")
+        except HTTPException:
+            continue
+        conversation = await db.get(Conversation, conversation_id)
+        if conversation is None:
+            continue
+        users, permissions = await _participant_permission_rows(db, conversation_id)
+        if conversation.type == "group":
+            if not conversation.ai_enabled:
+                continue
+            allowed_ids = {participant.id for participant in users}
+        else:
+            caller_permission = permissions.get(user_id)
+            if caller_permission is None or not caller_permission.granted:
+                continue
+            allowed_ids = {
+                participant.id
+                for participant in users
+                if (permission := permissions.get(participant.id)) is not None
+                and permission.contribution_allowed
+            }
+        if not allowed_ids:
+            continue
+        rows = (
+            await db.execute(
+                select(Message, User)
+                .join(User, User.id == Message.sender_id)
+                .where(
+                    Message.conversation_id == conversation_id,
+                    Message.sender_id.in_(allowed_ids),
+                    Message.content.ilike(pattern, escape="\\"),
+                )
+                .order_by(Message.created_at.desc(), Message.id.desc())
+                .limit(safe_limit)
+            )
+        ).all()
+        matches.extend((message, sender, conversation) for message, sender in rows)
+
+    matches.sort(key=lambda row: (row[0].created_at, row[0].id), reverse=True)
+    timezone = ZoneInfo(get_settings().calendar_timezone)
+    return "\n".join(
+        f"[{conversation.name or conversation.id}] {sender.display_name} "
+        f"[{message.created_at.astimezone(timezone).isoformat()}]: {message.content}"
+        for message, sender, conversation in matches[:safe_limit]
     )

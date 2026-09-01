@@ -2,7 +2,6 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import select
 
 from src.config import get_settings
@@ -17,7 +16,7 @@ from src.db.models import (
     WorkspaceMembership,
 )
 from src.models.schemas import MessageScope
-from src.services import chat_service, consent_service
+from src.services import consent_service
 
 
 async def _get_user_id(email: str) -> str:
@@ -237,77 +236,45 @@ async def test_unread_excludes_own_messages_and_messages_before_last_read(client
 
 
 @pytest.mark.asyncio
-async def test_get_first_unread_message_id_returns_earliest_unread(client, auth_headers, other_auth_headers):
+async def test_unread_returns_newest_two_hundred_in_chronological_order(
+    client, auth_headers, other_auth_headers
+):
     alice_id = await _get_user_id("alice@example.com")
     bob_id = await _get_user_id("bob@example.com")
     now = datetime.now(UTC)
-    alice_last_read = now - timedelta(hours=1)
-    msgs = [
-        (bob_id, "before alice read", now - timedelta(hours=2)),
-        (bob_id, "first unread", now - timedelta(minutes=10)),
-        (bob_id, "second unread", now - timedelta(minutes=5)),
+    alice_last_read = now - timedelta(hours=6)
+    messages = [
+        (bob_id, f"unread-{index}", now - timedelta(minutes=205 - index))
+        for index in range(205)
     ]
-    conv_id = await _seed_conversation(alice_id, bob_id, msgs, last_read_ats={alice_id: alice_last_read})
-
-    async with db_session.async_session_maker() as db:
-        rows = (await db.execute(select(Message).where(Message.conversation_id == conv_id))).scalars().all()
-        first_unread = next(m for m in rows if m.content == "first unread")
-        result = await chat_service.get_first_unread_message_id(db, conv_id, alice_id)
-
-    assert result == first_unread.id
-
-
-@pytest.mark.asyncio
-async def test_get_first_unread_message_id_excludes_own_messages(client, auth_headers, other_auth_headers):
-    """Sending your own message doesn't count as something you need to catch up on."""
-    alice_id = await _get_user_id("alice@example.com")
-    bob_id = await _get_user_id("bob@example.com")
-    now = datetime.now(UTC)
-    msgs = [(alice_id, "own message", now - timedelta(minutes=5))]
-    conv_id = await _seed_conversation(alice_id, bob_id, msgs, last_read_ats={alice_id: now - timedelta(hours=1)})
-
-    async with db_session.async_session_maker() as db:
-        result = await chat_service.get_first_unread_message_id(db, conv_id, alice_id)
-
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_get_first_unread_message_id_none_when_everything_read(client, auth_headers, other_auth_headers):
-    alice_id = await _get_user_id("alice@example.com")
-    bob_id = await _get_user_id("bob@example.com")
-    now = datetime.now(UTC)
-    msgs = [(bob_id, "already read", now - timedelta(minutes=10))]
-    conv_id = await _seed_conversation(alice_id, bob_id, msgs, last_read_ats={alice_id: now})
-
-    async with db_session.async_session_maker() as db:
-        result = await chat_service.get_first_unread_message_id(db, conv_id, alice_id)
-
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_get_first_unread_message_id_none_for_non_participant(client, auth_headers, other_auth_headers):
-    alice_id = await _get_user_id("alice@example.com")
-    bob_id = await _get_user_id("bob@example.com")
-    await client.post(
-        "/api/v1/auth/register",
-        json={"email": "carol-unread@example.com", "password": "password123", "display_name": "Carol"},
+    conv_id = await _seed_conversation(
+        alice_id,
+        bob_id,
+        messages,
+        last_read_ats={alice_id: alice_last_read},
     )
-    carol_login = await client.post(
-        "/api/v1/auth/login", json={"email": "carol-unread@example.com", "password": "password123"}
-    )
-    carol_headers = {"Authorization": f"Bearer {carol_login.json()['access_token']}"}
-    carol_id = (await client.get("/api/v1/auth/me", headers=carol_headers)).json()["id"]
-    conv_id = await _seed_conversation(alice_id, bob_id, [(bob_id, "hi", datetime.now(UTC))])
 
-    # A non-participant isn't just "shown nothing" - assert_participant (called internally) now
-    # denies access outright, same as any other non-member trying to read this conversation.
     async with db_session.async_session_maker() as db:
-        with pytest.raises(HTTPException) as exc:
-            await chat_service.get_first_unread_message_id(db, conv_id, carol_id)
+        view = await consent_service.build_authorized_message_view(
+            db,
+            conv_id,
+            200,
+            user_id=alice_id,
+            scope=MessageScope(kind="unread", count=200),
+        )
 
-    assert exc.value.status_code == 404
+    contents = _contents(view.text)
+    assert len(contents) == 200
+    assert contents[0] == "unread-5"
+    assert contents[-1] == "unread-204"
+
+
+def test_only_unread_scope_accepts_two_hundred_message_count():
+    assert MessageScope(kind="unread", count=200).count == 200
+    with pytest.raises(ValueError, match="only unread scope"):
+        MessageScope(kind="latest_n", count=200)
+    with pytest.raises(ValueError):
+        MessageScope(kind="unread", count=201)
 
 
 @pytest.mark.asyncio

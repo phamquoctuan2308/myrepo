@@ -7,6 +7,7 @@ from fastapi.exceptions import HTTPException
 from src.auth.security import decode_access_token
 from src.db import session as db_session
 from src.db.models import User
+from src.models.chat_content import MAX_CHAT_MESSAGE_LENGTH
 from src.services import chat_service, event_extraction_service, proactive_service
 from src.services.authorization_service import require_conversation_access
 from src.websocket.manager import manager
@@ -55,6 +56,11 @@ async def chat_websocket(websocket: WebSocket) -> None:
             content = (data.get("content") or "").strip()
             if not conversation_id or not content:
                 await websocket.send_json({"type": "error", "detail": "conversation_id and content are required"})
+                continue
+            if len(content) > MAX_CHAT_MESSAGE_LENGTH:
+                await websocket.send_json(
+                    {"type": "error", "code": "message_too_large", "detail": "Message exceeds the 5 MB limit"}
+                )
                 continue
 
             async with db_session.async_session_maker() as db:
