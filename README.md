@@ -1,227 +1,204 @@
 # P-132 — Orbit AI Assistant
 
-Dự án AI20K Build Phase: một AI agent nhúng trong ứng dụng chat, giúp tóm tắt hội thoại, trích xuất công việc/lịch hẹn, tạo nhắc nhở (có xác nhận trước khi thực hiện) và quản lý lịch cá nhân. Repo gồm 2 phần: **backend** (FastAPI + LangGraph, thư mục `src/`) và **frontend** (React + Vite, thư mục `Frontend/`).
+Dự án AI20K Build Phase: Orbit là trợ lý AI cá nhân nhúng trong ứng dụng chat, giúp người dùng tóm tắt hội thoại, trích xuất công việc/lịch hẹn, tạo nhắc nhở có xác nhận và quản lý lịch cá nhân. Multi-Agent theo Workspace là **hướng phát triển tiếp theo** để mở rộng Orbit từ trợ lý cá nhân thành trợ lý chuyên môn cho các nhóm trong công ty. Repo gồm **backend** (FastAPI + LangGraph, thư mục `src/`) và **frontend** (React + Vite, thư mục `Frontend/`).
 
 ## Mô hình sản phẩm
 
-Orbit dùng hai loại tài khoản: người dùng và `platform_admin`. Task, Memory, Reminder và Calendar
-thuộc trực tiếp về từng người dùng. Hội thoại chỉ có thể được đọc bởi participant đang hoạt động;
-platform admin không có đường API đọc nội dung tin nhắn gốc.
+### Sản phẩm hiện tại: Personal Agent
+
+Orbit hiện tập trung vào trợ lý cá nhân cho từng user. Task, Memory, Reminder và Calendar thuộc phạm vi cá nhân; AI chỉ đọc conversation khi user là participant và đã cấp quyền AI phù hợp.
+
+Hệ thống có hai loại tài khoản:
+
+- **User**: sử dụng chat, Personal Agent, task, calendar, reminder và memory của mình.
+- **Platform Admin**: quản lý tài khoản, cấu hình AI, usage và audit; không mặc định có quyền đọc nội dung chat của user.
+
+Personal Agent là flow mặc định của `POST /api/v1/chat` và trang `/assistant`. Mọi hành động có side effect như tạo/sửa/xóa Calendar hoặc Reminder đều phải chờ user xác nhận.
+
+### Hướng mở rộng sau MVP: Multi-Agent theo Workspace
+
+Multi-Agent chưa phải flow mặc định của sản phẩm hiện tại. Đây là hướng mở rộng đã được thiết kế để phục vụ bài toán cộng tác nội bộ:
+
+```text
+Company Root
+├── Product Delivery Workspace → Product Delivery Agent
+├── Quality Assurance Workspace → Quality Assurance Agent
+└── Executive Workspace → Executive Agent
+                                      └── tổng hợp brief hợp lệ
+```
+
+Khi triển khai giai đoạn này, Personal Agent vẫn được giữ nguyên cho dữ liệu cá nhân. Các Workspace Agent sẽ có scope, membership và tool riêng; Executive Agent chỉ tổng hợp `WorkspaceBrief` đã được kiểm chứng, không đọc raw chat liên phòng ban. Foundation và thiết kế chi tiết nằm trong thư mục [`docs/`](docs/), nhưng các feature flag Multi-Agent hiện mặc định tắt.
 
 ## Hiện có gì
 
 ### Đã hoạt động thật (có backend, có database)
 
-- **Đăng ký / Đăng nhập / Đăng xuất**: tài khoản lưu thật trong database PostgreSQL, mật khẩu hash bằng bcrypt, xác thực bằng JWT. Route bên trong ứng dụng (`/assistant`, `/chat`, `/tasks`, ...) được bảo vệ — chưa đăng nhập sẽ tự chuyển về `/login`.
-- **Đăng nhập bằng Google**: nút "Sign in with Google" trên `/login` và `/register` (cùng 1 nút xử lý cả đăng nhập lẫn đăng ký lần đầu). Backend xác minh ID token của Google (`src/auth/google_oauth.py`), không cần client secret. Tài khoản Google được lưu trong bảng `google_identities` riêng (không đụng bảng `users`/mật khẩu hiện có); nếu email trùng tài khoản mật khẩu có sẵn thì tự liên kết — nhưng chỉ khi Google xác nhận `email_verified`. Cần tự tạo Google OAuth Client ID (xem mục "Cách chạy web" bước 2) mới bật được nút này.
-- **Agent nhớ hội thoại bền vững qua PostgreSQL**: agent dùng `AsyncPostgresSaver` — hội thoại/interrupt sống sót qua restart backend. Trên Windows, bắt buộc chạy bằng `python scripts/run_dev.py` thay vì `uvicorn` CLI trực tiếp — xem mục "Cách chạy web" bên dưới.
-- **Nhắn tin 1-1 và theo nhóm, real-time**: tạo cuộc trò chuyện 1-1 hoặc nhóm (chọn nhiều người), gửi/nhận tin nhắn tức thời qua WebSocket, xem lại lịch sử tin nhắn, đếm tin nhắn chưa đọc. Ô soạn tin tự giãn theo nội dung, có bảng chọn emoji và đính kèm file (tối đa 5 file, mỗi file ≤ 3 MB): ảnh hiện inline ngay trong bong bóng tin nhắn ở cả hai phía, file khác thành link tải. Đính kèm được nhúng thẳng vào nội dung tin nhắn (data URL), chưa có kho lưu trữ file riêng. Giao diện `/chat` và `/assistant` dùng được trên điện thoại: danh sách hội thoại kiểu Messenger, panel AI dạng tấm phủ toàn màn hình, composer không bị bàn phím ảo che.
-- **AI Agent (chat với AI)**: endpoint `/api/v1/chat` (yêu cầu đăng nhập) dùng LangGraph, có tool gọi Google Calendar và tạo nhắc nhở với bước xác nhận (human-in-the-loop) trước khi thực hiện. Hỗ trợ 3 provider LLM (Google Gemini, Groq, hoặc OpenAI — đổi qua `LLM_PROVIDER` trong `.env`) để dễ chuyển khi một bên hết quota.
-- **AI Assistant cá nhân** (`/assistant`): khung chat riêng nối thẳng vào agent thật ở trên (không phải dữ liệu mẫu) — hỏi tự do, khi agent muốn tạo lịch/nhắc việc sẽ hiện nút Xác nhận/Huỷ ngay trong chat.
-- **Phân quyền Admin tách biệt**: quyền nền tảng dùng `platform_role`. Platform admin quản lý tài khoản, cấu hình AI, thống kê usage và audit log; không có API đọc/quản lý hội thoại, Task, Memory hay Reminder của người dùng.
-- **Cảnh báo + tự chặn khi vượt hạn mức token/chi phí**: khi lượng dùng vượt ngưỡng cấu hình, platform admin đang online nhận cảnh báo realtime; các lượt gọi LLM mới bị chặn khi hết ngân sách nhưng lượt xác nhận đang chờ vẫn được hoàn tất.
-- **Tóm tắt hội thoại theo yêu cầu**: trong trang Chat, bấm icon AI trên header → **Summarize** — AI đọc tin nhắn thật (theo scope 20/50 tin gần nhất đang chọn) và trả về bản tóm tắt.
-- **Trích xuất Task từ hội thoại**: cùng panel AI → **Extract tasks** — AI tìm việc cần làm/lịch hẹn trong hội thoại, lưu vào trang `/tasks` mục "AI suggestions"; người dùng bấm **Accept**/**Dismiss** để xác nhận. Panel AI còn có **Find schedule**, **Deadlines**, **Suggest reminder** (hiện nút Xác nhận/Huỷ ngay trong panel vì tạo reminder cần human-in-the-loop), cùng ô **Ask Orbit** để hỏi tự do về hội thoại đang xem.
-- **Task Inbox ưu tiên** (`/tasks/inbox`): gom gợi ý AI cần quyết định, task quá hạn, sắp đến hạn và task ưu tiên cao thành các nhóm dễ xử lý.
-- **Google Calendar riêng theo người dùng, đồng bộ 2 chiều, realtime**: mỗi người kết nối tài khoản Google của mình bằng OAuth; refresh token được mã hóa trong database. Sự kiện WebSocket chỉ gửi cho chủ lịch. Candidate rút ra từ chat nhóm vẫn cần manager xác nhận, rồi được ghi vào lịch của chính manager đó. Thay đổi từ Google được bắt bằng incremental sync token và polling (`CALENDAR_POLL_INTERVAL_SECONDS`).
-- **Nhắc nhở bền vững + realtime**: trang `/reminders` tạo nhắc nhở thật, lưu DB, sống sót qua restart server (APScheduler + `SQLAlchemyJobStore`); khi đến giờ, đẩy thông báo realtime qua WebSocket dù đang ở trang nào.
-- **Hồ sơ cá nhân** (`/profile`): sửa tên/chức danh/timezone/tuỳ chọn thông báo và đổi mật khẩu — lưu thật vào database, không còn là dữ liệu mẫu.
-- **Memory có phạm vi rõ ràng** (`/memory`): thêm/sửa/xoá "điều Orbit nên nhớ về bạn". Agent chỉ tìm kiếm memory và task thuộc đúng user của lượt chat hiện tại.
-- **Agent chủ động (proactive), realtime**: mỗi tin nhắn mới trong Chat được rà tự động (pre-filter rẻ + LLM xác nhận) — nếu chứa cam kết/lịch hẹn/hạn chót, Orbit tự tạo gợi ý và đẩy thẳng vào `/tasks` mục "AI suggestions" qua WebSocket (không cần refresh) kèm toast, không cần người dùng chủ động yêu cầu. Toàn bộ thao tác Task (accept/dismiss/complete/xoá) cũng đồng bộ realtime giữa các tab/thiết bị.
-- **Múi giờ thống nhất Asia/Ho_Chi_Minh (Hà Nội)**: mọi nơi hiển thị ngày giờ đều quy về giờ Hà Nội qua utility riêng của `Frontend/user` và `Frontend/admin`. Backend cũng cố định giờ Hà Nội cho scheduler và mốc "hôm nay" của thống kê token.
+- **Đăng ký / Đăng nhập / Đăng xuất**: tài khoản lưu trong PostgreSQL, mật khẩu hash bằng bcrypt, xác thực bằng JWT. Các route protected (`/assistant`, `/chat`, `/tasks`, ...) yêu cầu đăng nhập.
+- **Đăng nhập bằng Google**: User app có nút Sign in with Google ở `/login` và `/register`. Backend xác minh Google ID token và lưu liên kết trong bảng `google_identities`; không cần client secret cho flow này.
+- **Nhắn tin 1-1 và theo nhóm, real-time**: tạo conversation, gửi/nhận qua WebSocket, xem lịch sử và đếm tin chưa đọc. Chat hỗ trợ emoji, file đính kèm tối đa 5 file, mỗi file tối đa 3 MB, cùng giao diện responsive cho điện thoại.
+- **Personal AI Agent**: `/api/v1/chat` chạy LangGraph planner với các tool cá nhân; `/assistant` là giao diện chat riêng có lưu danh sách thread và resume sau restart.
+- **Tóm tắt và trích xuất task**: trong AI panel của conversation, Summarize và Extract tasks đọc context đã được kiểm tra consent; task suggestion được xác nhận bằng Accept/Dismiss.
+- **Task, Inbox và Reminder**: CRUD task thật, `/tasks/inbox` gom task cần quyết định/quá hạn/sắp đến hạn/ưu tiên cao; reminder lưu DB, có scheduler và thông báo realtime.
+- **Google Calendar per-user**: mỗi user tự kết nối Google Calendar của mình bằng OAuth; token được mã hóa trước khi lưu. Tạo/sửa/xóa event từ AI luôn yêu cầu human-in-the-loop.
+- **Memory và agent chủ động**: user quản lý memory cá nhân; agent có thể phát hiện cam kết trong chat để tạo task suggestion, nhưng không tự tạo side effect Calendar/Reminder khi chưa được xác nhận.
+- **Phân quyền Admin tách biệt**: Admin app chạy riêng ở cổng 5174, dùng `platform_role`; platform admin quản lý tài khoản, cấu hình AI, usage và audit.
+- **Cảnh báo và giới hạn AI**: theo dõi usage theo ngày, cảnh báo khi gần hạn mức và chặn lượt gọi AI mới khi vượt ngân sách; lượt xác nhận đang chờ vẫn được hoàn tất.
+- **Múi giờ thống nhất Asia/Ho_Chi_Minh**: frontend, scheduler và các mốc thống kê dùng giờ Hà Nội.
 
-### Công cụ đánh giá (dev, không phải tính năng người dùng)
+### Công cụ phát triển
 
-- `scripts/eval_extract_tasks.py` — đo Precision/Recall/F1 của việc trích xuất **tiêu đề** task, và riêng **độ chính xác ngày giờ** (`due_at` có resolve đúng "ngày mai"/"thứ Sáu này" theo ngày chạy thật không — hai thứ này lệch pha nhau: tiêu đề đúng không có nghĩa ngày đúng) trên bộ dữ liệu tay (8 case tiếng Việt + Anh, có cả case không có task để đo độ chính xác). Gọi LLM thật nên không nằm trong `pytest tests/` — chạy tay: `python scripts/eval_extract_tasks.py`. Kết quả gần nhất (model `gpt-4o-mini` qua OpenAI): **Title F1 = 100%, Date accuracy = 100%** (8/8 case, 7/7 case có ngày).
+- `alembic upgrade head` — nâng cấp schema database theo migration hiện tại.
+- `pytest tests/` — test backend và policy; `ruff check src/ tests/` — lint backend; `npm run build` — build hai frontend.
+- `scripts/seed_multi_agent_demo.py` — dữ liệu synthetic phục vụ thử nghiệm hướng Multi-Agent tương lai, không cần cho flow Personal Agent thông thường.
 
 ### Chưa xong
 
-- **Deploy online**: có `Dockerfile`/`docker-compose.yml` nhưng chưa deploy lên domain public.
+- **Deploy online public**: đã có Docker, Render/Vercel và workflow nhưng chưa xác nhận domain production trong source code.
+- **Mở rộng Multi-Agent**: hiện là roadmap sau MVP. Repo đã có foundation/thiết kế thử nghiệm cho Company Root, Agent Workspace, Delivery/QA/Executive profile, scope guard và `WorkspaceBrief`, nhưng chưa phải trải nghiệm mặc định cho người dùng.
+- **Nghiệp vụ chuyên môn mở rộng**: milestone, dependency và các nguồn dữ liệu phòng ban cần được bổ sung dần bằng resource thật; khi thiếu nguồn, hệ thống phải báo data gap thay vì tự suy đoán.
 
 ## Kiến trúc
 
-> **Backend nằm ở thư mục [`src/`](src/) ở gốc repo** (FastAPI + LangGraph), tách biệt hoàn toàn với hai frontend ở [`Frontend/user/`](Frontend/user/) và [`Frontend/admin/`](Frontend/admin/) (React + Vite). Trên Windows, chạy backend bằng `python scripts/run_dev.py` từ thư mục gốc repo.
+> **Backend** nằm trong [`src/`](src/) và có một FastAPI process dùng chung cho REST, WebSocket, Personal Agent và scheduler. Hai frontend là [`Frontend/user/`](Frontend/user/) và [`Frontend/admin/`](Frontend/admin/).
 
+```text
+├── src/
+│   ├── agents/
+│   │   ├── graph.py            # LangGraph Personal Agent và checkpoint
+│   │   ├── nodes/              # planner, guardrail, context và compaction
+│   │   ├── tools/              # personal tools; foundation specialist ở các module riêng
+│   │   ├── contracts.py        # contract chung cho agent và hướng mở rộng
+│   │   ├── router.py           # router/scope foundation cho Multi-Agent tương lai
+│   │   └── policies/           # authorization và resource guard
+│   ├── api/                    # auth, chat, task, calendar, admin và workspace routes
+│   ├── db/                     # SQLAlchemy models, session và Alembic migrations
+│   ├── models/                 # Pydantic request/response schemas
+│   ├── services/               # chat, memory, calendar, reminder, scheduler và workspace
+│   └── websocket/              # kênh realtime
+├── tests/                      # backend, authorization và HITL tests
+└── Frontend/
+    ├── user/                   # User app, cổng 5173
+    ├── admin/                  # Admin app, cổng 5174
+    └── src/                    # component/style dùng chung và compatibility surfaces
 ```
-├── src/                  # Backend — FastAPI + LangGraph
-│   ├── agents/           # Agent LangGraph (planner, tools, state)
-│   ├── api/               # REST routes: auth, chat (người-với-người), agent chat
-│   ├── auth/              # Hash mật khẩu, tạo/kiểm tra JWT
-│   ├── db/                # SQLAlchemy models + session (PostgreSQL)
-│   ├── models/             # Pydantic schemas
-│   ├── services/           # chat_service, scheduler, llm, usage_service
-│   ├── websocket/          # Kênh real-time cho chat
-│   └── main.py             # Điểm khởi tạo FastAPI app
-├── tests/                 # pytest cho backend
-└── Frontend/               # npm workspace: user app (5173) + admin app (5174)
-    └── src/
-        ├── api/            # Gọi REST API + WebSocket client
-        ├── context/         # AuthContext (JWT, user hiện tại)
-        ├── hooks/            # useConversations, useMessages
-        ├── components/        # Component theo tính năng (chat, layout, ...)
-        ├── pages/              # Các trang ứng dụng
-        └── router/              # React Router + ProtectedRoute
+
+### Flow hiện tại và hướng mở rộng
+
+```text
+Hiện tại
+  user → auth/consent → Personal Agent LangGraph → personal tools → câu trả lời/HITL
+
+Sau MVP
+  user + workspace membership → deterministic router → Delivery/QA Agent
+  Executive membership → validated WorkspaceBrief → Executive Agent
 ```
+
+Trong giai đoạn hiện tại, `requested_scope=personal` là mặc định. `requested_scope=workspace|aggregate` chỉ dành cho prototype và giai đoạn mở rộng sau MVP; quyền thật không đến từ field client tự khai mà được backend resolve từ membership, resource binding và policy.
 
 ## Cách chạy web (local development)
 
-Cần chạy backend (cổng 8000) và ít nhất một frontend. User app chạy ở cổng 5173; Admin app độc lập chạy ở cổng 5174.
+Cần chạy backend ở cổng 8000 và ít nhất User frontend ở cổng 5173. Admin frontend ở cổng 5174 chỉ cần chạy khi quản lý hệ thống.
 
 ### 1. Chuẩn bị
 
 - Python 3.11+
 - Node.js 18+ và npm
-- PostgreSQL đang chạy (local hoặc Docker) — bắt buộc, dự án không còn hỗ trợ SQLite. Tạo sẵn 1
-  database (ví dụ `orbit`), sẽ dùng địa chỉ này cho `DATABASE_URL` ở bước 2.
-- Đã clone repo và `cd` vào thư mục gốc dự án
+- PostgreSQL cho runtime chính; SQLite chỉ nên dùng cho unit test/compatibility.
+- Đã clone repo và `cd` vào thư mục gốc dự án.
 
 ### 2. Chạy Backend
 
 ```bash
-# Tạo virtual environment (chỉ cần làm 1 lần)
+# Tạo virtual environment một lần
 python -m venv .venv
 
-# Kích hoạt venv
-# Windows PowerShell:
+# Windows PowerShell
 .venv\Scripts\Activate.ps1
-# macOS/Linux:
-source .venv/bin/activate
 
-# Cài dependency
+# macOS/Linux
+# source .venv/bin/activate
+
 pip install -r requirements.txt
 
-# Tạo file cấu hình (chỉ cần làm 1 lần)
+# Tạo cấu hình local
 cp .env.example .env
-# Mở .env, điền GOOGLE_API_KEY (lấy tại https://aistudio.google.com/apikey) nếu muốn dùng tính năng AI chat (tóm tắt, calendar, nhắc nhở).
-#   Nếu tài khoản Google chưa có quota free-tier (lỗi 429/quota=0 khi gọi), đổi provider:
-#   - Groq: LLM_PROVIDER=groq, GROQ_API_KEY (lấy tại https://console.groq.com/keys), MODEL_NAME=openai/gpt-oss-20b.
-#   - OpenAI: LLM_PROVIDER=openai, OPENAI_API_KEY (lấy tại https://platform.openai.com/api-keys), MODEL_NAME=gpt-4o-mini.
-# Sửa DATABASE_URL trỏ vào database Postgres đã tạo ở bước 1 (postgresql://user:pass@host:5432/dbname) — bắt buộc, không có giá trị mặc định.
-# Điền ADMIN_BOOTSTRAP_KEY để tạo admin đầu tiên tại http://localhost:5174/register.
-# Đăng ký ở User frontend luôn tạo tài khoản thường; không còn tự cấp role admin.
-# Muốn bật nút "Đăng nhập bằng Google": tạo 1 OAuth Client ID loại "Web application" tại
-#   https://console.cloud.google.com/apis/credentials, Authorized JavaScript origins:
-#   http://localhost:5173. Điền Client ID vào GOOGLE_OAUTH_CLIENT_ID ở đây, và giá trị y hệt vào
-#   VITE_GOOGLE_CLIENT_ID trong Frontend/user/.env (bước 3) — không điền thì nút Google bị vô hiệu
-#   động, các tính năng khác không ảnh hưởng.
-# Muốn bật nút "Connect Google Calendar" (mỗi user tự nối Calendar riêng của họ):
-#   1. Bật "Google Calendar API" tại https://console.cloud.google.com — APIs & Services → Library.
-#   2. OAuth consent screen: thêm scope https://www.googleapis.com/auth/calendar, thêm email từng
-#      người sẽ test vào "Test users" (scope nhạy cảm nên app ở chế độ Testing, tối đa 100 test
-#      user, ai không có trong danh sách sẽ gặp lỗi access_denied).
-#   3. Credentials → Create Credentials → OAuth client ID → Web application (KHÁC client đăng nhập
-#      ở trên — client này cần đổi authorization code lấy refresh token nên phải có Client Secret).
-#   4. Authorized redirect URIs: thêm ĐÚNG http://localhost:8000/api/v1/calendar/oauth/callback
-#      (đây là redirect thật, không phải popup — phải khớp từng ký tự với GOOGLE_CALENDAR_REDIRECT_URI).
-# Điền GOOGLE_CALENDAR_CLIENT_ID + GOOGLE_CALENDAR_CLIENT_SECRET ở đây — không cần điền gì ở
-#   Frontend/user/.env.local (khác với nút đăng nhập ở trên, nút Connect Calendar không cần biến VITE_* nào,
-#   toàn bộ OAuth chạy ở backend). Cũng cần CREDENTIAL_ENCRYPTION_KEY (mã hoá refresh token trước
-#   khi lưu DB) — sinh 1 lần bằng:
-#     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-#   Không điền GOOGLE_CALENDAR_CLIENT_ID/SECRET thì nút Connect vẫn hiện nhưng bấm vào báo lỗi rõ
-#   ràng thay vì mở được màn hình Google; các tính năng khác không ảnh hưởng.
-
-# Chạy backend
-# Windows PowerShell (bắt buộc dùng launcher này để chọn SelectorEventLoop):
-python scripts/run_dev.py
-
-# macOS/Linux:
-# uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+# PowerShell có thể dùng: Copy-Item .env.example .env
 ```
 
-Nếu có `make` (macOS/Linux, hoặc cài Make trên Windows), có thể dùng `make run`.
+Trong `.env`, điền `DATABASE_URL` tới PostgreSQL và một provider LLM (`GOOGLE_API_KEY`, hoặc Groq/OpenAI tương ứng). Các flag Multi-Agent giữ nguyên `false` nếu chỉ chạy sản phẩm Personal Agent:
 
-**Windows**: luôn dùng `python scripts/run_dev.py` thay cho lệnh `uvicorn` ở trên (cùng `--reload`, cùng cổng 8000) — không phải tuỳ chọn. Lý do: agent memory bền vững (`AsyncPostgresSaver`) cần `SelectorEventLoop`, nhưng CLI `uvicorn` trên Windows luôn chọn `ProactorEventLoop` trước cả khi app được import, không có cờ nào sửa được — `run_dev.py` gọi `uvicorn.run()` trực tiếp bằng Python để chỉ định đúng loại event loop.
+```dotenv
+MULTI_AGENT_ENABLED=false
+PRODUCT_DELIVERY_AGENT_ENABLED=false
+QUALITY_ASSURANCE_AGENT_ENABLED=false
+EXECUTIVE_AGENT_ENABLED=false
+```
 
-Kiểm tra backend đã chạy: mở `http://localhost:8000/health` phải trả về `{"status":"ok",...}`. Swagger UI (danh sách toàn bộ API) ở `http://localhost:8000/docs`.
+```bash
+# Windows PowerShell: dùng launcher để chọn SelectorEventLoop cho async checkpointer
+python scripts/run_dev.py
+
+# macOS/Linux
+uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Kiểm tra backend: `http://localhost:8000/health`. Swagger UI: `http://localhost:8000/docs`.
 
 ### 3. Chạy hai Frontend
-
-Frontend đã tách thành hai app độc lập:
 
 ```bash
 cd Frontend
 npm install
 npm run dev:user
-# Terminal khác, nếu cần giao diện quản trị:
+
+# Terminal khác nếu cần Admin app
 npm run dev:admin
 ```
 
-Mở `http://localhost:5173` cho ứng dụng người dùng và `http://localhost:5174` cho Admin. Cấu hình local nằm riêng trong `Frontend/user/.env` và `Frontend/admin/.env`, tạo từ file `.env.example` tương ứng.
+Mở `http://localhost:5173` cho User app và `http://localhost:5174` cho Admin app. Cấu hình frontend nằm ở `Frontend/user/.env` và `Frontend/admin/.env`, tạo từ `.env.example` tương ứng.
 
 ### 4. Dùng thử
 
-1. Vào `http://localhost:5173/register`, tạo tài khoản.
-2. Mở thêm một trình duyệt/tab ẩn danh khác, tạo tài khoản thứ hai.
-3. Từ tài khoản thứ nhất, vào trang **Chats**, bấm nút bút (soạn tin nhắn) để chọn người và bắt đầu chat 1-1 hoặc chọn nhiều người để tạo nhóm.
-4. Gửi tin nhắn — tài khoản còn lại sẽ nhận tin nhắn theo thời gian thực nếu đang mở cùng cuộc trò chuyện, hoặc thấy số tin nhắn chưa đọc.
-5. Muốn thử **Admin**: đăng ký tài khoản có email trùng `INITIAL_ADMIN_EMAIL`, sau đó đăng nhập ứng dụng Admin tại `http://localhost:5174/login`. Backend vẫn là lớp bắt buộc kiểm tra `platform_role`.
-6. Muốn thử **AI Summarize / Extract tasks / Find schedule / Deadlines / Ask Orbit**: cần điền `GOOGLE_API_KEY` (hoặc Groq, xem bước 2) thật trong `.env`. Trong 1 cuộc trò chuyện có vài tin nhắn, bấm icon AI trên header (⭐) rồi thử từng quick action, hoặc gõ câu hỏi tự do vào ô "Ask Orbit".
-7. Muốn thử **AI Assistant cá nhân** (`/assistant`): vào trang này và chat trực tiếp — nếu bạn yêu cầu tạo lịch/nhắc việc, agent sẽ hỏi lại xác nhận ngay trong khung chat trước khi tạo thật.
-8. Muốn xem **theo dõi token AI**: vào `/admin` (cần tài khoản admin, xem bước 5) — 2 stat card "AI tokens used today"/"AI requests today" và banner cảnh báo khi dùng ≥80% ngân sách `DAILY_TOKEN_BUDGET`. Hạ tạm `DAILY_TOKEN_BUDGET` (ví dụ `=50`) trong `.env` rồi restart backend nếu muốn thấy toast cảnh báo realtime (`usage_budget_alert` qua WebSocket) xuất hiện ngay khi đang ở bất kỳ trang nào, không cần mở `/admin` — và xác nhận `/chat` bị chặn hẳn (không chỉ cảnh báo) một khi đã vượt hẳn ngân sách.
-9. Muốn thử **Agent chủ động**: gửi 1 tin nhắn kiểu "nhớ họp lúc 3h chiều mai nhé" trong trang Chat — vài giây sau sẽ có toast "Orbit spotted a commitment" ở góc phải, và gợi ý xuất hiện trong `/tasks` mục "AI suggestions".
-10. Muốn thử **Memory**: vào `/memory`, bấm "Add memory" để lưu một điều bạn muốn Orbit nhớ, sửa/xoá qua menu 3 chấm trên mỗi thẻ.
-11. Muốn thử **Task Inbox ưu tiên**: vào `/tasks/inbox` (hoặc mục "Inbox" trong Sidebar) — task quá hạn/sắp đến hạn/priority cao/cần quyết định được nhóm riêng khỏi danh sách task đầy đủ ở `/tasks`.
-12. Muốn thử **Đăng nhập bằng Google**: cần đã điền `GOOGLE_OAUTH_CLIENT_ID`/`VITE_GOOGLE_CLIENT_ID` thật (xem bước 2, 3). Vào `/login` hoặc `/register` của User frontend, bấm nút Google — lần đầu sẽ tạo tài khoản thường; admin đầu tiên phải tạo qua màn hình bootstrap của Admin.
-13. Muốn thử **Calendar (per-user)**: cần đã điền `GOOGLE_CALENDAR_CLIENT_ID`/`GOOGLE_CALENDAR_CLIENT_SECRET`/`GOOGLE_CALENDAR_REDIRECT_URI`/`CREDENTIAL_ENCRYPTION_KEY` thật (xem bước 2 — client riêng, khác client đăng nhập, cần Authorized redirect URI khớp chính xác). Vào `/calendar`, bấm **Connect Google Calendar** (mở popup thật tới Google, không phải giả lập), chọn tài khoản Google, đồng ý quyền truy cập — popup tự đóng, sau đó xem/tạo/sửa/xoá sự kiện thật trên đúng Calendar của tài khoản Google vừa chọn. Đăng nhập bằng 2 tài khoản khác nhau và tự Connect 2 Google account khác nhau ở mỗi bên để thấy rõ mỗi người có Calendar riêng, không dùng chung — tạo sự kiện bên A không hiện bên B.
-14. Muốn thử **đính kèm file / emoji trong chat**: trong một hội thoại, bấm icon kẹp giấy ở ô soạn tin để chọn ảnh/file (≤ 3 MB, tối đa 5), hoặc icon mặt cười để chèn emoji, rồi gửi — ảnh hiện ngay trong bong bóng tin nhắn ở cả hai phía, file khác là link tải. Gõ đoạn dài nhiều dòng để thấy ô soạn tin tự cao dần (trần ~120px). Thử thu nhỏ cửa sổ xuống cỡ điện thoại (hoặc mở bằng DevTools device mode) để kiểm tra `/chat` và `/assistant` trên màn hình hẹp.
+1. Vào `http://localhost:5173/register`, tạo tài khoản user.
+2. Mở một tab ẩn danh khác để tạo tài khoản thứ hai và thử chat 1-1/nhóm.
+3. Trong `/chat`, mở AI panel để thử Summarize, Extract tasks, Find schedule hoặc Ask Orbit.
+4. Vào `/assistant` để chat trực tiếp với Personal Agent; tạo/sửa/xóa Calendar hoặc Reminder sẽ dừng lại chờ xác nhận.
+5. Mở `http://localhost:5174/register`, dùng `ADMIN_BOOTSTRAP_KEY` để tạo platform admin đầu tiên, rồi đăng nhập tại `/login` của Admin app.
+6. Vào `/tasks/inbox` để xem task suggestion, task quá hạn và task sắp đến hạn.
+7. Vào `/calendar` để kết nối Google Calendar per-user nếu đã cấu hình OAuth.
+8. Các trang `/workspaces` và `/workspace-briefs` thuộc hướng Multi-Agent mở rộng; chỉ dùng khi team đã provision workspace và bật đúng feature flags.
 
-### 5. Test Calendar cùng nhiều thành viên trong nhóm
+### 5. Test Calendar cùng nhiều thành viên
 
-Calendar là tính năng **per-user** (mỗi người tự connect đúng Google Calendar của mình), nhưng cả nhóm **dùng chung 1 OAuth Client** (`GOOGLE_CALENDAR_CLIENT_ID`/`SECRET`) — không cần ai tạo Google Cloud project riêng, và không cần deploy online mới test được.
+Calendar là per-user: mỗi thành viên tự kết nối Google Calendar của mình, nhưng nhóm có thể dùng chung một OAuth client. Không chia sẻ `CLIENT_SECRET` qua Git hoặc commit vào `.env`.
 
-1. **Một người trong nhóm** tạo Google Cloud project + OAuth Client theo đúng hướng dẫn ở bước 2 (mục "Connect Google Calendar"). Ở phần OAuth consent screen ("Audience" trong Console bản mới) → **Test users**, add **email Gmail của tất cả thành viên sẽ test** (tối đa 100, app đang ở chế độ Testing) — không phải chỉ email của người tạo.
-2. Người đó gửi `GOOGLE_CALENDAR_CLIENT_ID` + `GOOGLE_CALENDAR_CLIENT_SECRET` cho cả nhóm qua kênh riêng tư (chat nhóm) — **không** đưa lên GitHub/PR, không commit vào `.env`.
-3. Mỗi thành viên còn lại `git pull` rồi tự chạy backend + frontend trên máy mình như bước 1-3 ở trên, với:
-   - `DATABASE_URL` trỏ vào **database Postgres riêng trên máy họ** (không dùng chung DB với người khác — mỗi người có dữ liệu độc lập, kể cả token Calendar đã mã hoá).
-   - `GOOGLE_CALENDAR_CLIENT_ID`/`GOOGLE_CALENDAR_CLIENT_SECRET` = giá trị nhận ở bước 2 (dùng chung cho cả nhóm).
-   - `GOOGLE_CALENDAR_REDIRECT_URI` giữ nguyên mặc định `http://localhost:8000/api/v1/calendar/oauth/callback` — ai cũng chạy backend ở `localhost:8000` trên máy mình nên không cần đổi.
-   - `CREDENTIAL_ENCRYPTION_KEY` **tự sinh riêng** cho máy mình (không cần trùng với người khác, vì mỗi người có DB riêng ở trên).
-4. Mỗi người tự đăng ký 1 tài khoản Orbit riêng (bước 4.1), vào `/calendar` → **Connect Google Calendar** → chọn đúng Gmail đã được add làm Test user ở bước 1.
-
-Lỗi thường gặp khi test theo nhóm:
-- Bấm Connect ra lỗi `access_denied` ngay ở màn hình Google → email dùng để đăng nhập Google **không nằm trong Test users** (quay lại bước 1, add thêm).
-- Backend báo lỗi ngay khi bấm Connect, không mở được popup Google → quên điền hoặc quên **restart backend** sau khi sửa `GOOGLE_CALENDAR_CLIENT_ID`/`SECRET` trong `.env`.
-- Popup Google đóng lại nhưng báo "Could not connect Google Calendar." → xem log ở terminal đang chạy `python scripts/run_dev.py` ngay lúc đó để biết lý do cụ thể (thường in kèm traceback ở dòng `Failed to exchange the authorization code`).
+1. Tạo Google Cloud OAuth client cho Calendar và thêm email test users.
+2. Gửi `GOOGLE_CALENDAR_CLIENT_ID`/`SECRET` qua kênh riêng tư.
+3. Mỗi thành viên chạy backend/frontend local với PostgreSQL và `CREDENTIAL_ENCRYPTION_KEY` riêng.
+4. Mỗi người đăng nhập User app, vào `/calendar` và connect đúng Google account của mình.
 
 ### Chạy test backend
-
-Unit test dùng SQLite in-memory và `MemorySaver`, không đụng tới database dev. Các integration test
-checkpoint PostgreSQL chỉ chạy khi có `TEST_DATABASE_URL`; nếu muốn chạy chúng, tạo database riêng
-và đặt biến môi trường đó trước khi gọi pytest.
 
 ```bash
 pytest tests/ -v
 # hoặc: make test
 ```
 
+Test integration dùng PostgreSQL riêng qua `TEST_DATABASE_URL` khi cần. Unit test có thể dùng SQLite in-memory/MemorySaver.
+
 ### Chạy database migration
 
-Sao lưu database trước khi nâng cấp, sau đó chạy:
-
 ```bash
 alembic upgrade head
 ```
 
-Revision `20260813_08` loại bỏ schema phân vùng cũ nhưng giữ nguyên hội thoại, tin nhắn và dữ liệu cá nhân của các tài khoản đã đăng ký.
-
-### Checklist chạy production
-
-Production không tự gọi `create_all`; schema phải được nâng cấp có kiểm soát trước khi khởi động app:
-
-```bash
-alembic upgrade head
-```
-
-Đặt `APP_ENV=production`, dùng PostgreSQL, tạo `SECRET_KEY` ngẫu nhiên tối thiểu 32 byte, khai báo chính xác `CORS_ORIGINS` và API key tương ứng `LLM_PROVIDER`. Ứng dụng sẽ từ chối khởi động nếu còn SQLite, secret mẫu, CORS wildcard hoặc thiếu LLM credential trong production. Luôn sao lưu database và chạy migration trên staging trước.
+Luôn backup database và kiểm tra migration trên staging trước khi nâng cấp production. Dockerfile production cũng chạy migration trước khi khởi động Uvicorn.
 
 ### Lint và build kiểm tra
 
 ```bash
-# Từ thư mục gốc
 ruff check src/ tests/
 
-# Frontend production build
 cd Frontend
 npm run build
 ```
@@ -232,37 +209,38 @@ npm run build
 docker compose up --build
 ```
 
-Docker Compose hiện chỉ chạy backend tại cổng `8000`; frontend chạy riêng bằng `npm run dev`.
+Docker Compose chạy backend ở cổng 8000; frontend chạy riêng bằng npm.
 
 ## Công nghệ sử dụng
 
 | Layer | Công nghệ |
 | --- | --- |
-| AI Agent | LangGraph + LangChain (Google Gemini, Groq hoặc OpenAI, đổi qua `LLM_PROVIDER`) |
-| Backend | FastAPI, Pydantic 2, SQLAlchemy 2 async + PostgreSQL, JWT (PyJWT) + bcrypt, WebSocket |
-| Migration | Alembic (schema hiện tại dùng user ownership và conversation participants) |
-| Agent memory | `AsyncPostgresSaver` trong development/production; `MemorySaver` cô lập trong unit test |
-| Frontend | React 18, Vite, React Router, React Hook Form, Bootstrap 5, Framer Motion |
-| Calendar / Scheduler | Google Calendar API clients, APScheduler |
-| Test | pytest, pytest-asyncio, httpx |
-| Lint | ruff |
+| Personal Agent hiện tại | LangGraph + LangChain, tool calling, PostgreSQL checkpointer |
+| Backend | FastAPI, Pydantic 2, SQLAlchemy async, PostgreSQL, JWT, bcrypt, WebSocket |
+| Frontend | React 18, Vite, React Router, Bootstrap 5, Framer Motion |
+| Calendar / Scheduler | Google Calendar API, APScheduler |
+| Migration | Alembic |
+| Test / Lint | pytest, pytest-asyncio, httpx, ruff |
+| Multi-Agent sau MVP | Agent Workspace, deterministic router, scope/resource guard, WorkspaceBrief và Executive aggregation |
 
-## Tài liệu thiết kế Multi-Agent
+## Tài liệu định hướng Multi-Agent
 
-- [docs/README.md](docs/README.md) — mục lục và quy tắc single source of truth cho cả team.
-- [docs/BRIEF.md](docs/BRIEF.md) — ý tưởng, giá trị và phạm vi sản phẩm.
-- [docs/PRD.md](docs/PRD.md) — nghiệp vụ, yêu cầu và acceptance criteria.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — kiến trúc, data boundary, router, agent runtime và security.
+- [docs/README.md](docs/README.md) — mục lục và quy tắc single source of truth.
+- [docs/BRIEF.md](docs/BRIEF.md) — hướng mở rộng sản phẩm theo Workspace.
+- [docs/PRD.md](docs/PRD.md) — yêu cầu và acceptance criteria cho giai đoạn mở rộng.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data boundary, router, agent runtime và security.
+- [docs/AGENT_SYSTEM_DESIGN.md](docs/AGENT_SYSTEM_DESIGN.md) — prompt, tool, guardrail, memory và HITL của Personal/Multi-Agent.
 - [docs/ENTERPRISE_WORKSPACE_FOUNDATION.md](docs/ENTERPRISE_WORKSPACE_FOUNDATION.md) — Company Root, Workspace, role và membership.
-- [docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md](docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md) — phân công, dependency và release gate.
+- [docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md](docs/MULTI_AGENT_IMPLEMENTATION_PLAN.md) — kế hoạch phát triển sau MVP.
+- [docs/MULTI_AGENT_TEST_DATASET.md](docs/MULTI_AGENT_TEST_DATASET.md) — dataset thử nghiệm hướng Multi-Agent.
 
 ## Tài liệu khác
 
-- [SOLUTION.md](SOLUTION.md) — **cách nhóm đọc đề, mindset thiết kế, giải pháp, và metric cho bài toán** (gộp vấn đề → nguyên tắc → giải pháp → số đo → kết quả → future work).
-- [CLAUDE.md](CLAUDE.md) — hướng dẫn chi tiết cho AI coding assistant làm việc trong repo này (quy ước code, lệnh chạy đầy đủ).
-- [Frontend/README.md](Frontend/README.md) — hướng dẫn riêng cho frontend (cấu trúc, xử lý lỗi thường gặp khi chạy npm trên Windows).
-- [Frontend/detai.md](Frontend/detai.md) — đề bài / yêu cầu gốc của dự án.
-- [ARCHITECTURE.md](ARCHITECTURE.md) — con trỏ tương thích đến kiến trúc canonical trong `docs/`.
-- [ROADMAP.md](ROADMAP.md) — bảng đối chiếu từng yêu cầu đề bài với trạng thái thật hiện tại + việc còn lại theo độ ưu tiên.
-- [docs/deploy.md](docs/deploy.md) — hướng dẫn deploy production (Render + Supabase + Vercel + CD qua GitHub Actions), từng bước dashboard theo đúng thứ tự + checklist verify end-to-end.
-- [WORKLOG.md](WORKLOG.md) — nhật ký công việc theo ngày của cả nhóm.
+- [CLAUDE.md](CLAUDE.md) — hướng dẫn cho AI coding assistant.
+- [Frontend/README.md](Frontend/README.md) — cấu trúc và cách chạy hai frontend.
+- [Frontend/detai.md](Frontend/detai.md) — đề bài gốc của dự án.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — kiến trúc runtime tương thích và con trỏ tới tài liệu canonical.
+- [ROADMAP.md](ROADMAP.md) — trạng thái yêu cầu và việc còn lại.
+- [DEPLOYMENT.md](DEPLOYMENT.md) — kế hoạch hạ tầng production.
+- [docs/deploy.md](docs/deploy.md) — hướng dẫn triển khai dashboard từng bước.
+- [WORKLOG.md](WORKLOG.md) — nhật ký thay đổi theo ngày của cả nhóm.
