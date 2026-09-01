@@ -28,7 +28,7 @@ Orbit được xây dựng như một Personal AI Agent nằm trong ứng dụng
 - Tìm kiếm tin nhắn cũ và sử dụng memory cá nhân.
 - Quản lý ngân sách và chi phí AI ở phía Admin.
 
-Phạm vi được chấm trong báo cáo là **một Personal Agent có nhiều tool**. Multi-Agent theo Workspace được theo dõi riêng trong [Workspace Development Report](../docs/workspace-development/DEVELOPMENT_REPORT.md).
+Phạm vi được chấm trong báo cáo là **một Personal Agent có nhiều tool**. Multi-Agent theo Workspace được theo dõi riêng trong [Workspace Development Report](workspace-development/DEVELOPMENT_REPORT.md).
 
 ## 3. Phương pháp chấm điểm
 
@@ -502,7 +502,7 @@ Sản phẩm nên được phép pilot với nhóm nhỏ sau khi sửa các lỗ
 ## 11. Nguồn bằng chứng nội bộ
 
 - [README.md](../README.md) — tính năng sản phẩm và hướng dẫn chạy.
-- [Architecture](../docs/ARCHITECTURE.md) — kiến trúc Personal Agent và security boundary.
+- [Architecture](ARCHITECTURE.md) — kiến trúc Personal Agent và security boundary.
 - [Evaluation Evidence](EVALUATION_EVIDENCE.md) — test, accuracy, latency, cost, WebSocket, load, OAuth và feedback.
-- [Metrics](METRICS.md) — định nghĩa metric, benchmark và cost model.
+- [Metrics](../eval/METRICS.md) — định nghĩa metric, benchmark và cost model.
 - [WORKLOG.md](../WORKLOG.md) — lịch sử triển khai và các quyết định kỹ thuật.

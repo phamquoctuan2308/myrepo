@@ -81,7 +81,7 @@ tại nhưng **không được import ở đâu**. E2E và deploy online chưa l
 ### 2.4 Đo trước khi tuyên bố; `PENDING` không quy đổi thành pass
 
 Mọi con số chất lượng đều có **script tái lập** và **artifact có timestamp + commit SHA** trong
-`../eval/`. [EVALUATION_EVIDENCE.md](../eval/EVALUATION_EVIDENCE.md) ghi rõ: *"This report never
+`../eval/`. [EVALUATION_EVIDENCE.md](EVALUATION_EVIDENCE.md) ghi rõ: *"This report never
 converts missing evidence into a passing score"*. Latency P95 trên môi trường target và user feedback
 hiện là `PENDING` — và được để nguyên là `PENDING`, không đoán.
 
@@ -196,7 +196,7 @@ tin nhắn mới ──► regex pre-filter (EN+VI) ──match?──► hỏi 
 
 ## 4. Metric cho bài toán
 
-Khung đầy đủ: [METRICS.md](../eval/METRICS.md). Kết quả đo mới nhất: [EVALUATION_EVIDENCE.md](../eval/EVALUATION_EVIDENCE.md),
+Khung đầy đủ: [METRICS.md](../eval/METRICS.md). Kết quả đo mới nhất: [EVALUATION_EVIDENCE.md](EVALUATION_EVIDENCE.md),
 [`eval/results/`](../eval/results/). Ánh xạ yêu cầu ↔ test ↔ code: [TRACEABILITY_MATRIX.md](../eval/TRACEABILITY_MATRIX.md).
 
 ### 4.1 North-star và release gate
@@ -221,11 +221,11 @@ bình cao.
 | " | Memory isolation giữa user, loại memory hết hạn/thu hồi | 100% | `memory_isolation_pass_rate` **100%**, `expired_memory_rejection_rate` **100%** | `agent_acceptance_latest.md` |
 | " | Chống prompt injection / lộ secret | pass | `SEC-01` **PASS**; `tests/test_guardrails.py` Covered | `agent_acceptance_latest.md`, `SAFE-01` |
 | Routing đúng tool | `tool_routing_accuracy` | ≥ 0.95 | **100%** trên bộ acceptance | `agent_acceptance_latest.md` |
-| Độ trễ & chi phí | Latency P95 interactive (summarize/search) trên môi trường target | < 5 s | **PENDING** — runner có, chưa đo trên target env | `eval/EVALUATION_EVIDENCE.md` |
+| Độ trễ & chi phí | Latency P95 interactive (summarize/search) trên môi trường target | < 5 s | **PENDING** — runner có, chưa đo trên target env | `docs/EVALUATION_EVIDENCE.md` |
 | " | Latency quan sát trong bộ acceptance (không phải môi trường target) | tham khảo | p50 **3.25 s**, p95 **12.7 s**, mean 4.28 s | `agent_acceptance_latest.md` |
 | " | Overhead thêm vào lúc gửi tin nhắn (proactive async) | P95 < 300 ms | inference chạy async, ngoài critical path | `eval/METRICS.md §2.6` |
 | " | Token / run, cost / successful run | trong budget profile | run acceptance: ~80k token / 18 case / 28 lời gọi LLM | `agent_acceptance_latest.md` |
-| Chất lượng kỹ thuật | Regression suite | 100% pass | **416/417 passed, 1 skipped** | `eval/EVALUATION_EVIDENCE.md` |
+| Chất lượng kỹ thuật | Regression suite | 100% pass | **416/417 passed, 1 skipped** | `docs/EVALUATION_EVIDENCE.md` |
 | " | Source coverage | ≥ 60% | **67.9%** | `eval/results/coverage-latest.json` |
 | Proactive hữu ích | Suggestion precision | ≥ 0.90 | gate định nghĩa; acceptance rate lấy baseline ngày demo, mục tiêu pilot ≥ 30% | `eval/METRICS.md §2.6` |
 
@@ -351,7 +351,7 @@ qua các `WorkspaceBrief` đã kiểm chứng (không đọc raw chat liên phò
 | [README.md](../README.md) | Tính năng, cách chạy và dùng thử |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Kiến trúc sản phẩm nền tảng |
 | [METRICS.md](../eval/METRICS.md) | Khung metric và benchmark |
-| [EVALUATION_EVIDENCE.md](../eval/EVALUATION_EVIDENCE.md) | Bằng chứng release và số đo mới nhất |
+| [EVALUATION_EVIDENCE.md](EVALUATION_EVIDENCE.md) | Bằng chứng release và số đo mới nhất |
 | [TRACEABILITY_MATRIX.md](../eval/TRACEABILITY_MATRIX.md) | Yêu cầu ↔ test ↔ code ↔ evidence |
 | [WORKLOG.md](../WORKLOG.md) | Nhật ký thay đổi và cách verify |
 | [Workspace Development](workspace-development/README.md) | Phần phát triển mở rộng Multi-Agent |

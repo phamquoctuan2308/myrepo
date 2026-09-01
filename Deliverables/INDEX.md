@@ -9,7 +9,7 @@ Thư mục này chỉ chứa hoặc liên kết tới sản phẩm bàn giao cu�
 | Giải pháp | [SOLUTION.md](../docs/SOLUTION.md) |
 | Kiến trúc | [ARCHITECTURE.md](../docs/ARCHITECTURE.md) |
 | Sơ đồ kiến trúc | [architecture_diagram.md](../docs/architecture_diagram.md) |
-| Báo cáo đánh giá | [EVALUATION_EVIDENCE.md](../eval/EVALUATION_EVIDENCE.md) |
+| Báo cáo đánh giá | [EVALUATION_EVIDENCE.md](../docs/EVALUATION_EVIDENCE.md) |
 | Báo cáo kiểm thử thủ công | [MANUAL_TEST_REPORT.md](../eval/manual/MANUAL_TEST_REPORT.md) |
 | Bằng chứng hình ảnh | [`eval/manual/evidence/`](../eval/manual/evidence/) |
 | Báo cáo phát triển Workspace | [DEVELOPMENT_REPORT.md](../docs/workspace-development/DEVELOPMENT_REPORT.md) |

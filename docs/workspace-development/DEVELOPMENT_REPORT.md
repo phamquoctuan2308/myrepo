@@ -69,6 +69,6 @@ Các nhóm test hiện có bao gồm:
 
 ## 6. Quan hệ với bản bàn giao Personal Agent
 
-Kết quả Workspace không được dùng để thay thế các gate của Personal Agent trong `eval/EVALUATION_EVIDENCE.md`. Ngược lại, việc Workspace chưa phát hành không làm mất các tính năng Personal Agent đã bàn giao.
+Kết quả Workspace không được dùng để thay thế các gate của Personal Agent trong `docs/EVALUATION_EVIDENCE.md`. Ngược lại, việc Workspace chưa phát hành không làm mất các tính năng Personal Agent đã bàn giao.
 
 Khi chuẩn bị một release Workspace riêng, cần tạo bộ evidence tại `eval/workspace/`, pin commit/model/schema/policy version và chạy lại API, UI, authorization, HITL, latency, accessibility và rollback trên cùng môi trường mục tiêu.
