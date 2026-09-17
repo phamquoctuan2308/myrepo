@@ -28,39 +28,14 @@ env/
 .DS_Store
 Thumbs.db
 
-# Data (never commit large data)
-data/
-*.db
-*.dump
-
-# Google OAuth credentials/tokens
-secrets/
-credentials.json
-token.json
-
 # Logs
 logs/
 *.log
 
-# Test coverage
+# Test coverage & caches
 htmlcov/
 .coverage
 coverage.xml
 .tmp/
-
-# Docker
-docker-compose.override.yml
-
-# Node (frontend)
-node_modules/
-.next/
-out/
-.nuxt/
-
-# Build
-*.pyc
-*.pyo
-
-# AI logs — tracked structure, ignored content
-.ai-log/*.jsonl
-.ai-log/archive/
+.pytest_cache/
+.ruff_cache/

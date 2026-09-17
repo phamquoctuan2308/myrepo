@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VinWonder FlowCrew · Simulator</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --panel-2: #fafbfc;
+    --ink: #16191d;
+    --ink-soft: #5b6472;
+    --line: #e2e5ea;
+    --brand: #0f6f5c;
+    --brand-soft: #e6f2ef;
+    --warn: #b4690e;
+    --warn-soft: #fdf3e3;
+    --danger: #b3261e;
+    --danger-soft: #fdecea;
+    --ok: #1f7a3d;
+    --ok-soft: #e9f6ed;
+    --a0: #6b4fbb; --a1: #0f6f5c; --a2: #1b5e9c; --a3: #b4690e; --a4: #a3427c;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151a; --panel: #1a1f26; --panel-2: #20262f; --ink: #e8ecf1;
+      --ink-soft: #9aa5b4; --line: #2b323c;
+      --brand: #4fd0b0; --brand-soft: #16302b;
+      --warn: #e5a33d; --warn-soft: #33270f;
+      --danger: #f08b84; --danger-soft: #361a18;
+      --ok: #6fd18c; --ok-soft: #16301f;
+      --a0: #a892ef; --a1: #4fd0b0; --a2: #6fb2ef; --a3: #e5a33d; --a4: #e58dc0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header .sub { color: var(--ink-soft); font-size: 12px; }
+  .spacer { flex: 1; }
+  .clock {
+    font-variant-numeric: tabular-nums; font-weight: 650; font-size: 18px;
+    padding: 2px 10px; border-radius: 6px; background: var(--brand-soft); color: var(--brand);
+  }
+  button, select {
+    font: inherit; color: var(--ink); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--brand); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--brand); border-color: var(--brand); color: var(--panel); font-weight: 600; }
+  button.ok { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  button.no { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+  button.mini { padding: 4px 9px; font-size: 12px; }
+
+  main { padding: 16px 20px 40px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; }
+  .kpi b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .kpi span { color: var(--ink-soft); font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; }
+
+  .grid { display: grid; grid-template-columns: 300px minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
+  /* minmax(0, …) và min-width: 0 để một bảng hay dòng dài không nong cả trang
+     rộng hơn màn hình điện thoại; phần rộng tự cuộn trong khung của nó. */
+  .grid > section { min-width: 0; }
+  @media (max-width: 1240px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 640px) {
+    header { padding: 10px 16px; gap: 8px; }
+    header .spacer { display: none; }
+    main { padding: 12px 16px 32px; }
+    .step { grid-template-columns: 40px 78px minmax(0, 1fr); gap: 8px; }
+    .bubble { max-width: 92%; }
+  }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 16px; }
+  .panel > h2 {
+    margin: 0; padding: 11px 14px; font-size: 12.5px; font-weight: 650;
+    text-transform: uppercase; letter-spacing: .5px; color: var(--ink-soft);
+    border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px;
+  }
+  .panel > h2 .count {
+    margin-left: auto; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 20px; padding: 1px 9px; font-size: 11px; letter-spacing: 0;
+  }
+  .body { padding: 12px 14px; }
+  .scroll { max-height: 460px; overflow: auto; }
+  .empty { color: var(--ink-soft); font-style: italic; padding: 14px; }
+
+  /* mật độ khu */
+  .zone { margin-bottom: 12px; }
+  .zone-top { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+  .zone-top b { font-variant-numeric: tabular-nums; }
+  .bar { height: 7px; border-radius: 4px; background: var(--panel-2); margin-top: 5px; overflow: hidden; border: 1px solid var(--line); }
+  .bar i { display: block; height: 100%; background: var(--ok); }
+  .lv-busy i { background: var(--brand); }
+  .lv-crowded i { background: var(--warn); }
+  .lv-overload i { background: var(--danger); }
+  .zone small { color: var(--ink-soft); font-size: 11.5px; }
+
+  .alert { border-left: 3px solid var(--danger); background: var(--danger-soft); padding: 9px 11px; border-radius: 0 8px 8px 0; margin-bottom: 10px; }
+  .alert b { display: block; font-size: 13px; }
+  .alert small { color: var(--ink-soft); }
+
+  /* phòng chung */
+  .msg { display: flex; margin-bottom: 12px; }
+  .msg.mine { justify-content: flex-end; }
+  .bubble { max-width: 78%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 9px 12px; }
+  .msg.mine .bubble { background: var(--brand-soft); border-color: var(--brand); }
+  .bubble .who { font-size: 12px; font-weight: 650; margin-bottom: 3px; }
+  .bubble .txt { white-space: pre-wrap; }
+  .chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 20px; background: var(--panel); border: 1px solid var(--line); margin: 4px 4px 0 0; color: var(--ink-soft); }
+  .time { color: var(--ink-soft); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+  /* trace */
+  .tabs { display: flex; gap: 4px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); }
+  .tabs button { border-radius: 8px 8px 0 0; border-bottom-color: transparent; background: transparent; }
+  .tabs { overflow-x: auto; }
+  .tabs button { white-space: nowrap; flex: 0 0 auto; }
+  .tabs button[aria-selected="true"] { background: var(--panel-2); border-color: var(--line); border-bottom-color: var(--panel-2); font-weight: 600; }
+  .step { display: grid; grid-template-columns: 46px 96px 1fr; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--line); }
+  .step:last-child { border-bottom: 0; }
+  .step .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .3px; align-self: start; padding: 2px 6px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--line); text-align: center; }
+  .k-goal, .k-closed { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
+  .k-handoff { background: var(--panel-2); color: var(--a0); border-color: var(--a0); }
+  .k-approval_request { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+  .k-approval { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+  .k-blocked, .k-retry { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+  .step .t b { font-weight: 600; }
+  .step .t small { display: block; color: var(--ink-soft); }
+  .agent { font-weight: 650; }
+  .A0 { color: var(--a0); } .A1 { color: var(--a1); } .A2 { color: var(--a2); }
+  .A3 { color: var(--a3); } .A4 { color: var(--a4); }
+
+  /* phê duyệt */
+  .ticket { border: 1px solid var(--line); border-radius: 9px; padding: 11px; margin-bottom: 10px; background: var(--panel-2); }
+  .ticket.pending { border-color: var(--warn); }
+  .ticket h3 { margin: 0 0 6px; font-size: 13.5px; }
+  .ticket dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0; font-size: 12.5px; }
+  .ticket dt { color: var(--ink-soft); }
+  .ticket dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .ticket .acts { display: flex; gap: 6px; margin-top: 9px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
+  .b-pending { background: var(--warn-soft); color: var(--warn); }
+  .b-approved { background: var(--ok-soft); color: var(--ok); }
+  .b-rejected { background: var(--danger-soft); color: var(--danger); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--ink-soft); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  td.mono { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink-soft); }
+
+  /* hỏi thẳng */
+  .ask-row { display: flex; gap: 6px; margin-bottom: 8px; }
+  .ask-row select { flex: 0 0 64px; padding-inline: 8px; }
+  .ask-hint { color: var(--ink-soft); font-size: 12px; margin: -2px 0 8px; }
+  details.run { border-bottom: 1px dashed var(--line); }
+  details.run > summary { list-style: none; cursor: pointer; }
+  details.run > summary::-webkit-details-marker { display: none; }
+  details.run > summary .step { border-bottom: 0; }
+  details.run[open] > summary .step { border-bottom: 1px dashed var(--line); }
+  details.run .inner { padding-left: 56px; }
+  details.run .inner .step { grid-template-columns: 46px 1fr; }
+  .more { color: var(--brand); font-size: 12px; }
+  .ask-row input { flex: 1; min-width: 0; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); }
+  .answer { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; white-space: pre-wrap; font-size: 13px; }
+  .toast { position: fixed; right: 18px; bottom: 18px; max-width: 420px; background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger); border-radius: 9px; padding: 10px 14px; box-shadow: 0 6px 20px rgba(0,0,0,.14); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>VinWonder FlowCrew · Simulator</h1>
+    <div class="sub">VinWonders Nha Trang · 6 phân khu · 220 điểm dịch vụ · PoC 6 tuần</div>
+  </div>
+  <div class="clock" id="clock">--:--</div>
+  <div class="spacer"></div>
+  <label class="sub" for="role">Đang xem với vai</label>
+  <select id="role"></select>
+  <button class="primary" id="btn-incident">Mô phỏng sự cố 14:05</button>
+  <select id="fail" title="Giả lập một hệ thống không phản hồi để xem đường thử lại">
+    <option value="">Không lỗi hệ thống</option>
+    <option value="app">App khách lỗi 1 lần</option>
+    <option value="catalog">Catalogue lỗi 1 lần</option>
+    <option value="booking">Hệ thống đặt bàn lỗi 1 lần</option>
+    <option value="telephony">Tổng đài lỗi 1 lần</option>
+  </select>
+  <button id="btn-reset">Reset</button>
+</header>
+
+<main>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <section>
+      <div class="panel">
+        <h2>Mật độ theo khu <span class="count" id="zone-count"></span></h2>
+        <div class="body" id="zones"></div>
+      </div>
+      <div class="panel">
+        <h2>Cảnh báo A2 · hiện tại <span class="count" id="alert-count"></span></h2>
+        <div class="body" id="alerts"></div>
+      </div>
+      <div class="panel">
+        <h2>US-1 · Hỏi thẳng một agent</h2>
+        <div class="body">
+          <div class="ask-row">
+            <select id="ask-agent"></select>
+            <input id="ask-text">
+            <button id="btn-ask">Hỏi</button>
+          </div>
+          <div class="ask-hint" id="ask-hint"></div>
+          <div class="answer" id="answer">Mỗi agent trả lời được ngay, không cần chờ đúng thứ tự trong chuỗi sự cố.</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="panel">
+        <h2>Phòng chung <span class="count" id="room-count"></span></h2>
+        <div class="body scroll" id="room"></div>
+      </div>
+      <div class="panel">
+        <div class="tabs" role="tablist">
+          <button role="tab" aria-selected="true" data-tab="trace">Live trace</button>
+          <button role="tab" aria-selected="false" data-tab="messages">Tin nhắn tới khách</button>
+          <button role="tab" aria-selected="false" data-tab="calls">Cuộc gọi đối tác</button>
+        </div>
+        <div class="body scroll" id="trace-body"></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="panel">
+        <h2>Cổng phê duyệt <span class="count" id="ticket-count"></span></h2>
+        <div class="body scroll" id="tickets"></div>
+      </div>
+      <div class="panel">
+        <h2>Nhật ký audit <span class="count" id="audit-count"></span></h2>
+        <div class="body scroll" style="padding:0">
+          <table id="audit"><thead><tr><th>#</th><th>Giờ</th><th>Ai</th><th>Sự kiện</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+const API = "/api/v1/flow-crew";
+const ACTORS = {
+  shift_lead: "Trưởng ca Nguyễn Văn An",
+  marketing: "Marketing Lê Thu Hà",
+  park_manager: "Quản lý công viên Trần Bá Minh",
+  guest: "Khách hàng",
+};
+const KPI_LABELS = {
+  guests_replanned: "Khách xếp lại lịch",
+  guests_unresolved: "Không còn phương án",
+  reservations_rescued: "Lịch đặt được cứu",
+  handoffs: "Bàn giao",
+  auto_executed: "Tự động chạy",
+  executed_with_approval: "Chạy sau khi duyệt",
+  blocked_actions: "Bị policy chặn",
+  bypass_attempts_blocked: "Chặn đi tắt",
+  tool_retries: "Thử lại tool",
+};
+// Câu hỏi mẫu lấy đúng bảng US-1 ở mục 7 của charter.
+const SAMPLE_QUESTIONS = {
+  A0: "Kiểm tra tình hình khu Sea World giúp tôi",
+  A1: "Cho tôi lịch trình chơi 1 ngày",
+  A2: "Mật độ Fairy Land hiện giờ thế nào?",
+  A3: "Khu nào đang cần can thiệp?",
+  A4: "Đổi giờ đặt bàn giúp tôi",
+};
+const STEP_KINDS = {
+  goal: "mục tiêu", handoff: "bàn giao", action: "thực thi", replan: "xếp lịch",
+  option: "phương án", approval_request: "chờ duyệt", approval: "quyết định",
+  rescue: "cứu lịch", retry: "thử lại", blocked: "bị chặn", closed: "khép vòng",
+};
+let snap = null;
+let tab = "trace";
+let signature = "";
+
+const $ = (id) => document.getElementById(id);
+const esc = (value) => String(value ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const hhmm = (iso) => new Date(iso).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", hour12: false });
+const vnd = (amount) => amount.toLocaleString("vi-VN") + "đ";
+
+// Cùng quy tắc với can_approve() ở contracts.py: Quản lý công viên bao trùm các
+// quyết định vận hành, nhưng không ai ký thay khách.
+function canApprove(actor, required) {
+  if (required === "guest") return actor === "guest";
+  if (actor === "guest") return false;
+  return actor === required || actor === "park_manager";
+}
+
+function toast(message) {
+  document.querySelector(".toast")?.remove();
+  const box = document.createElement("div");
+  box.className = "toast";
+  box.textContent = message;
+  document.body.append(box);
+  setTimeout(() => box.remove(), 6000);
+}
+
+async function call(path, options) {
+  const response = await fetch(API + path, options);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.detail || response.statusText);
+  return payload;
+}
+
+async function refresh() {
+  render(await call("/snapshot"));
+}
+
+async function act(path, body) {
+  try {
+    render(await call(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    }));
+  } catch (error) {
+    toast(error.message);
+    refresh();
+  }
+}
+
+function render(data) {
+  // Mọi thay đổi trạng thái đều để lại ít nhất một dòng audit, nên chữ ký này đủ
+  // để biết có gì mới; vẽ lại khi không có gì đổi sẽ kéo người đang đọc về đầu.
+  const next = `${data.clock}|${data.kpis.audit_entries}`;
+  if (next === signature) return;
+  signature = next;
+  snap = data;
+  $("btn-incident").disabled = data.workflows.length > 0;
+  $("clock").textContent = hhmm(data.clock);
+  renderKpis();
+  renderZones();
+  renderAlerts();
+  renderRoom();
+  renderTrace();
+  renderTickets();
+  renderAudit();
+}
+
+function renderKpis() {
+  const chain = snap.kpis.audit_chain_valid;
+  $("kpis").innerHTML =
+    Object.entries(KPI_LABELS)
+      .map(([key, label]) => `<div class="kpi"><b>${snap.kpis[key]}</b><span>${label}</span></div>`)
+      .join("") +
+    `<div class="kpi"><b style="color:var(--${chain ? "ok" : "danger"})">${snap.kpis.audit_entries}</b>
+      <span>Bản ghi audit · chuỗi ${chain ? "nguyên vẹn" : "đã gãy"}</span></div>`;
+}
+
+function renderZones() {
+  $("zone-count").textContent = snap.zones.length + " khu";
+  $("zones").innerHTML = snap.zones.map((zone) => `
+    <div class="zone">
+      <div class="zone-top"><span>${esc(zone.zone_name)}</span><b>${zone.load_pct.toFixed(0)}%</b></div>
+      <div class="bar lv-${zone.level}"><i style="width:${Math.min(100, zone.load_pct)}%"></i></div>
+      <small>${zone.headcount.toLocaleString("vi-VN")} khách · sức chứa ${zone.capacity.toLocaleString("vi-VN")}
+        · đà ${zone.trend_pct_per_10min > 0 ? "+" : ""}${zone.trend_pct_per_10min}%/10 phút</small>
+    </div>`).join("");
+}
+
+function renderAlerts() {
+  $("alert-count").textContent = snap.alerts.length;
+  $("alerts").innerHTML = snap.alerts.length
+    ? snap.alerts.map((alert) => `
+      <div class="alert">
+        <b>#${alert.rank} ${esc(alert.zone_name)} · ${alert.load_pct.toFixed(0)}%</b>
+        <small>${alert.minutes_to_overload ? "Quá tải trong " + alert.minutes_to_overload + " phút" : "Đã quá tải"}
+          · ngưỡng ${alert.threshold_pct}% · mức nghiêm trọng ${alert.severity_score}</small>
+        ${alert.service_name ? `<small>${esc(alert.service_name)}${alert.guests_heading
+          ? ` · ${alert.guests_heading} khách vẫn đang hướng tới` : ""}</small>` : ""}
+      </div>`).join("")
+    : `<div class="empty">Chưa khu nào vượt ngưỡng vận hành.</div>`;
+}
+
+function renderRoom() {
+  const me = ACTORS[$("role").value];
+  $("room-count").textContent = snap.room.length;
+  $("room").innerHTML = snap.room.length
+    ? snap.room.map((message) => {
+        const mine = message.author === me;
+        const tag = message.author.slice(0, 2);
+        return `<div class="msg ${mine ? "mine" : ""}">
+          <div class="bubble">
+            <div class="who"><span class="agent ${tag}">${esc(message.author)}</span>
+              <span class="time"> · ${hhmm(message.at)}</span></div>
+            <div class="txt">${esc(message.text)}</div>
+            ${message.mentions.map((name) => `<span class="chip">@${esc(name)}</span>`).join("")}
+          </div></div>`;
+      }).join("")
+    : `<div class="empty">Phòng chung trống. Bấm "Mô phỏng sự cố 14:05" để A2 đưa mục tiêu vào đây.</div>`;
+  $("room").scrollTop = $("room").scrollHeight;
+}
+
+function renderTrace() {
+  const box = $("trace-body");
+  if (tab === "messages") {
+    box.innerHTML = snap.messages.length
+      ? snap.messages.map((message) => `<div class="step">
+          <span class="time">${hhmm(message.at)}</span>
+          <span class="k">${esc(message.guest_id)}</span>
+          <div class="t">${esc(message.text)}</div></div>`).join("")
+      : `<div class="empty">Chưa có tin nào gửi cho khách.</div>`;
+    return;
+  }
+  if (tab === "calls") {
+    box.innerHTML = snap.calls.length
+      ? snap.calls.map((call) => `<div class="step">
+          <span class="time">${call.duration_seconds}s</span>
+          <span class="k">${call.reached ? "xác nhận" : "chuyển người"}</span>
+          <div class="t"><b>${esc(call.outlet_id)}</b>
+            ${call.transcript.map((line) => `<small>${esc(line)}</small>`).join("")}</div></div>`).join("")
+      : `<div class="empty">Chưa có cuộc gọi đối tác nào. A4 chỉ gọi khi outlet không có hệ thống đặt bàn.</div>`;
+    return;
+  }
+  box.innerHTML = snap.trace.length
+    ? groupRuns(snap.trace).map((item) => Array.isArray(item) ? runRow(item) : stepRow(item)).join("")
+    : `<div class="empty">Chưa có bước nào chạy.</div>`;
+  box.scrollTop = box.scrollHeight;
+}
+
+const GUEST_TAIL = / (G-\d{3})$/;
+
+// A1 ghi lịch rồi báo cho từng khách một — 28 khách là 56 dòng giống nhau. Gộp
+// chuỗi đó thành một dòng mở ra được, để giai đoạn quan trọng không bị chìm.
+function groupRuns(steps) {
+  const out = [];
+  let run = [];
+  const flush = () => {
+    if (run.length >= 4) out.push(run);
+    else out.push(...run);
+    run = [];
+  };
+  for (const step of steps) {
+    const repeatable = step.kind === "action" && GUEST_TAIL.test(step.title);
+    if (repeatable && (!run.length || run[0].actor === step.actor)) {
+      run.push(step);
+      continue;
+    }
+    flush();
+    if (repeatable) run.push(step);
+    else out.push(step);
+  }
+  flush();
+  return out;
+}
+
+function stepRow(step) {
+  return `<div class="step">
+    <span class="time">${hhmm(step.at)}</span>
+    <span class="k k-${esc(step.kind)}">${esc(STEP_KINDS[step.kind] || step.kind)}</span>
+    <div class="t"><b class="agent ${esc(step.actor)}">${esc(step.actor)}</b> — ${esc(step.title)}
+      ${step.detail ? `<small>${esc(step.detail)}</small>` : ""}</div></div>`;
+}
+
+function runRow(steps) {
+  const guests = [...new Set(steps.map((step) => step.title.match(GUEST_TAIL)[1]))];
+  const verbs = [...new Set(steps.map((step) => step.title.replace(GUEST_TAIL, "")))];
+  const first = steps[0];
+  return `<details class="run"><summary><div class="step">
+      <span class="time">${hhmm(first.at)}</span>
+      <span class="k k-action">${STEP_KINDS.action}</span>
+      <div class="t"><b class="agent ${esc(first.actor)}">${esc(first.actor)}</b> — ${esc(verbs.join(" · "))}
+        cho ${guests.length} khách
+        <small>${esc(guests[0])} → ${esc(guests[guests.length - 1])} · ${steps.length} bước
+          · ${esc(first.detail)} <span class="more">xem từng bước</span></small></div></div></summary>
+    <div class="inner">${steps.map((step) => `<div class="step">
+      <span class="time">${hhmm(step.at)}</span><div class="t">${esc(step.title)}</div></div>`).join("")}</div>
+  </details>`;
+}
+
+function renderTickets() {
+  const role = $("role").value;
+  const pending = snap.approvals.filter((ticket) => ticket.status === "pending");
+  $("ticket-count").textContent = `${pending.length} chờ / ${snap.approvals.length}`;
+  const ordered = [...snap.approvals].sort((a, b) =>
+    (a.status !== "pending") - (b.status !== "pending")
+    || !canApprove(role, a.required_role) - !canApprove(role, b.required_role)
+    || a.ticket_id.localeCompare(b.ticket_id));
+  $("tickets").innerHTML = ordered.length
+    ? ordered.map((ticket) => {
+        const codes = [...new Set(ticket.decisions.flatMap((decision) => decision.policy_codes))];
+        const action = ticket.actions[0];
+        const mine = canApprove(role, ticket.required_role);
+        const open = ticket.status === "pending";
+        return `<div class="ticket ${open ? "pending" : ""}">
+          <h3>${esc(ticket.title)}</h3>
+          <span class="badge b-${ticket.status}">${{ pending: "chờ duyệt", approved: "đã duyệt", rejected: "đã từ chối" }[ticket.status]}</span>
+          <span class="chip">cần ${esc(snap.labels.roles[ticket.required_role])}</span>
+          <dl>
+            <dt>Khách ảnh hưởng</dt><dd>${action.affected_guests.toLocaleString("vi-VN")}</dd>
+            <dt>Chi phí ước tính</dt><dd>${vnd(action.estimated_cost_vnd)}</dd>
+            <dt>Căn cứ policy</dt><dd>${codes.map((code) => `<span class="chip" title="${esc(snap.policies[code] || "")}">${code}</span>`).join(" ")}</dd>
+            ${ticket.decided_by ? `<dt>Người quyết</dt><dd>${esc(ticket.decided_by)}</dd>` : ""}
+          </dl>
+          ${ticket.guest_message_preview ? `<small class="time">Tin sẽ gửi khách: ${esc(ticket.guest_message_preview)}</small>` : ""}
+          ${open ? `<div class="acts">
+            <button class="ok mini" ${mine ? "" : "disabled"} onclick="decide('${ticket.ticket_id}', true)">Duyệt</button>
+            <button class="no mini" ${mine ? "" : "disabled"} onclick="decide('${ticket.ticket_id}', false)">Từ chối</button>
+            ${mine ? "" : `<span class="time">Vai đang xem không có thẩm quyền</span>`}
+          </div>` : ""}
+        </div>`;
+      }).join("")
+    : `<div class="empty">Chưa có gói nào cần duyệt.</div>`;
+}
+
+function renderAudit() {
+  $("audit-count").textContent = snap.kpis.audit_entries;
+  $("audit").querySelector("tbody").innerHTML = snap.audit.map((entry) => `
+    <tr><td class="mono">${entry.seq}</td><td class="mono">${hhmm(entry.at)}</td>
+      <td class="mono">${esc(entry.actor)}</td>
+      <td><b>${esc(entry.event)}</b><br>${esc(entry.detail)}</td></tr>`).join("");
+}
+
+async function decide(ticketId, approved) {
+  const role = $("role").value;
+  await act(`/approvals/${ticketId}/decision`, {
+    role,
+    actor_name: ACTORS[role],
+    approved,
+    note: approved ? "Duyệt từ dashboard" : "Từ chối từ dashboard",
+  });
+}
+
+async function openIncident() {
+  const tool = $("fail").value;
+  if (tool) await act("/simulation/inject-failure", { tool, times: 1 });
+  await act("/incidents", { closed_service_id: "SW-DOLPHIN" });
+}
+
+async function ask() {
+  const agent = $("ask-agent").value;
+  const question = $("ask-text").value.trim() || SAMPLE_QUESTIONS[agent];
+  $("answer").textContent = "Đang hỏi…";
+  try {
+    const answer = await call("/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent, question, guest_id: "G-014" }),
+    });
+    $("answer").textContent = answer.text;
+  } catch (error) {
+    $("answer").textContent = "Lỗi: " + error.message;
+  }
+  refresh();
+}
+
+function boot() {
+  $("role").innerHTML = Object.entries(ACTORS)
+    .map(([role, name]) => `<option value="${role}">${name}</option>`).join("");
+  $("ask-agent").innerHTML = Object.keys(SAMPLE_QUESTIONS)
+    .map((agent) => `<option value="${agent}">${agent}</option>`).join("");
+  const syncAgent = () => {
+    const agent = $("ask-agent").value;
+    $("ask-text").placeholder = SAMPLE_QUESTIONS[agent];
+    $("ask-hint").textContent = snap?.labels.agents[agent] || "";
+  };
+  $("ask-agent").value = "A2";
+  $("ask-agent").onchange = syncAgent;
+
+  $("role").onchange = () => { renderRoom(); renderTickets(); };
+  $("btn-incident").onclick = openIncident;
+  $("btn-reset").onclick = () => act("/simulation/reset");
+  $("btn-ask").onclick = ask;
+  $("ask-text").onkeydown = (event) => { if (event.key === "Enter") ask(); };
+  document.querySelectorAll(".tabs button").forEach((button) => {
+    button.onclick = () => {
+      tab = button.dataset.tab;
+      document.querySelectorAll(".tabs button").forEach((other) =>
+        other.setAttribute("aria-selected", String(other === button)));
+      renderTrace();
+    };
+  });
+
+  refresh().then(syncAgent);
+  // Hai cửa sổ cạnh nhau (Trưởng ca và Marketing) thấy cùng một trạng thái.
+  setInterval(refresh, 3000);
+}
+boot();
+</script>
+</body>
+</html>
